@@ -1,0 +1,6 @@
+node_modules
+dist
+*.db
+src/data
+.env
+.env.example
