@@ -447,7 +447,13 @@ export class JobCrawler {
             (el: Element) =>
               (el.textContent?.toLowerCase().trim() === 'apply now' ||
                 el.textContent?.toLowerCase().trim() === 'apply for this role' ||
-                el.textContent?.toLowerCase().trim() === 'apply') ??
+                el.textContent?.toLowerCase().trim() === 'apply' ||
+                el.textContent?.toLowerCase().trim() === 'submit application' ||
+                el.textContent?.toLowerCase().trim() === 'apply for this job' ||
+                el.textContent?.toLowerCase().trim() === 'apply for this position' ||
+                el.textContent?.toLowerCase().trim() === 'apply for this opportunity' ||
+                el.textContent?.toLowerCase().trim() === 'apply for this position' ||
+                el.textContent?.toLowerCase().trim() === 'application') ??
               false,
             // Href contains common apply patterns
             (el: Element) => {
