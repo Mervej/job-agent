@@ -22,7 +22,7 @@ export async function generateText(systemPrompt: string, userPrompt: string) {
     const url = `${config.ollama.url}/api/generate`;
     const requestBody = {
       model: config.ollama.model,
-      prompt: `${systemPrompt}\n\n${userPrompt}`,
+      prompt: `${userPrompt}`,
       stream: false, // Request non-streaming response
     };
 

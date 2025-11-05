@@ -44,65 +44,65 @@ export class ApplicationFiller {
       args: ['--no-sandbox', '--disable-setuid-sandbox'],
     });
 
-    // this.processMultipleApplications(
-    //   [
-    //     {
-    //       jobUrl:
-    //         'https://apply.workable.com/innovaccer-analytics/j/A35FEDD669/?utm_campaign=8cb0e1f428&utm_medium=eps&utm_source=link',
-    //       coverLetter:
-    //         "Dear Hiring Manager,\n\nI'm thrilled to apply for the Senior Product Manager position at Innovaccer, where I can leverage my technical expertise and passion for driving innovative solutions in healthcare. With over 8 years of experience in backend development and system design across various domains, including healthcare, fintech, and entertainment, I'm confident that my skills align with the key requirements of this role.\n\nAs a seasoned product management professional, I've had the privilege of working on complex projects, from migrating monoliths to microservices architectures to developing scalable backend systems for healthcare marketing automation. My expertise in building high-performance, event-driven microservices has allowed me to drive initiatives from concept to delivery, ensuring seamless communication across teams.\n\nI'm particularly drawn to Innovaccer's mission to revolutionize healthcare by activating the flow of data and empowering providers, payers, and government organizations. As someone who has worked extensively with healthcare marketing automation, I understand the importance of aligning product vision, goals, and supporting business metrics to achieve success indicators. My experience in defining projects, understanding customer requirements, writing detailed functional and test specifications, and coordinating efforts to scope, schedule, and deploy new features sets me well for this role.\n\nI'm impressed by Innovaccer's commitment to driving intelligent and connected experiences that advance health outcomes. I believe my technical background in Node.js (NestJS, Express), Golang, MySQL, PostgreSQL, MongoDB, Elasticsearch, Redis, AWS, Azure, Kafka, CI/CD Automation, Microservices Architecture, and Event-driven Systems will enable me to effectively work with the engineering team to drive product development.\n\nAs a strong communicator, I've had success in driving large-scale projects cross-functionally with designers, software development engineers, other product managers, and external partners. My experience in defining and conducting market research, gathering information from multiple sources, developing insights, and translating findings into action will allow me to effectively gather requirements from internal and external stakeholders.\n\nI'm excited about the opportunity to join a dynamic team of skilled individuals who transform ideas into real-life solutions. I believe my unique blend of technical expertise, product management skills, and passion for innovation make me an ideal candidate for this role. I look forward to discussing how my experience and skills align with the key requirements of this position.\n\nThank you for considering my application. I've attached my resume for your review.\n\nSincerely,\nMervej Raj",
-    //       resumePath:
-    //         '/Users/mervej.raj/Documents/Projects/Personal/job-agent/src/data/resumes/1.pdf',
-    //       applyLink: 'https://apply.workable.com/innovaccer-analytics/j/A35FEDD669/apply/',
-    //       resumeText:
-    //         '\n\nMervej Raj\n«\nGitlab|\nï\nLinkedIn|\n#\nmervejraj@gmail.com|\nH\n+91 97645 77845\nSummary\nSenior Software Engineer with 8+ years of experience in backend development,  system design,  and scalable\narchitectures.   Expert  in  building  high-performance,  event-driven  microservices  and  leading  cross-functional\nteams.  Strong advocate for automation, DevOps integration, and clean, maintainable code.\nWork Experience\nInnovaccer, Noida — Software EngineerSep 2025 – Present\n–  Builtscalable backend systemsfor  the  Cured  team  to  orchestratemulti-channel healthcare mar-\nketing campaigns,  implementingaudience segmentation,template management,  andreal-time\nanalytics APIsthat enable automated outreach viaSMS, email, and IVRacross multiple clients.\nBajaj Finserv Health, Pune — Principal Software EngineerMar 2023 – Sep 2025\n–  Migratedmonolith to microservicesandmonorepo architecturewithKafkaandAzure Service\nBus— reducing deployment time by30%, improving scalability by20%, cutting downtime by12%, and\nincreasing throughput by15%.\n–  Createdend-to-end payment reconciliation systemachieving100% transaction tracking accuracy\nand50% faster reconciliation.  Improved payment success to95%and payout success to99%.\n–  Led engineering team, mentoring onarchitecture, delivery, andcross-functional collaboration.\nBookMyShow, Mumbai — Software Development Engineer IIJul 2021 – Mar 2023\n–  DeliveredBMS Play Credit CardwithRBL Bank,RBI mandate card tokenisation,  andAPI\nintegrationswith SBI and RBL for bank offers, boosting engagement by25%.\n–  Builtbackend and CMSfor BMS offers withAPI governanceinNode.jsandGolang— improving\nefficiency  by20%,  accelerating  rollouts  by15%,  enhancing  reliability  by30%,  and  reducing  latency  by\n20%.\nTerribly Tiny Tales, Mumbai — Senior Software EngineerApr 2019 – Jul 2021\n–  Developedbackend applicationswithNode.js, MySQL, Redis,  andElasticsearch,  and  designed\nsubscription-based payment systemusingRazorpaywith recurring billing — improving performance\nby25%.\nLivelike, Gurugram — Software DeveloperJun 2017 – Mar 2019\n–  Developed  and  integratedvirtual reality apps,  enhancing  immersive  experience  offerings  for  multiple\nclients.\nPersonal Projects\nPixel Streaming Demo\nBuilt a WebRTC-based product enabling instant interactivity with 3D apps off-device using Node.js, MySQL,\nReact & AWS. Achieved near-zero download time and low latency, with autoscaling to handle real-time traffic\nsurges.\nEducation\n2013 – 2017    B.Tech, National Institute of Technology, Nagpur\n2010 – 2012    12th, Cotton College, Assam\nSkills & Highlights\nProgrammingNode.js (NestJS, Express) — 6+ yrs; Golang — 4+ yrs\nDatabasesMySQL, PostgreSQL, MongoDB, Elasticsearch, Redis, Aerospike\nFrameworks / ToolsPub-sub, Queues, Mailing, Notifications, Payment Gateways (PayU, Razorpay etc)\nAI & AutomationAI Tools (GitHub Copilot, Cursor, Windsurf), MCP Servers (Postgres, Azure ,AWS,\nGitlab, Context7 etc)\nDevOps / CloudAWS (EC2, ECS, S3), Azure (Pipelines, AKS, Blob Storage), CI/CD Design, Build\nAutomation',
-    //     },
-    //     {
-    //       jobUrl:
-    //         'https://stripe.com/jobs/listing/software-engineer-operations-platform/7108247?gh_src=73vnei',
-    //       coverLetter:
-    //         "Dear Hiring Manager, \n\nI am writing to express my interest in the Software Engineer position at Stripe. As a professional career coach and cover letter expert, I have reviewed the job description and your resume, Mervej Raj, and I am impressed with your experience and skills. Your background in building scalable backend systems for various industries aligns perfectly with Stripe's mission to increase the global economy's GDP.\n\nI was particularly drawn to your experience in microservices architecture, as it demonstrates your ability to design and deliver high-performance systems. Your success in reducing deployment time by 30% and improving scalability by 20% is impressive, and I believe you could make a significant impact at Stripe.\n\nYour passion for automation, DevOps integration, and clean, maintainable code also resonated with me. As a platform that relies on secure and reliable systems, Stripe must prioritize these values in its engineering practices. Your experience leading engineering teams and mentoring developers on architecture and delivery best practices suggests that you could thrive in a collaborative and supportive work environment like Stripe's.\n\nIn addition to your technical skills, I appreciate your ability to communicate complex ideas clearly and effectively. Your writing style is engaging, professional, and tailored to the specific role and company, which is essential for making a strong first impression at Stripe.\n\nBased on my analysis of your resume and cover letter, I believe you have the skills, experience, and passion necessary to excel as a Software Engineer at Stripe. I highly recommend you for this position and look forward to seeing how you will contribute to the company's mission.\n\nSincerely,\n[Your Name]",
-    //       resumePath:
-    //         '/Users/mervej.raj/Documents/Projects/Personal/job-agent/src/data/resumes/1.pdf',
-    //       applyLink:
-    //         'https://stripe.com/jobs/listing/software-engineer-operations-platform/7108247/apply?gh_src=73vnei',
-    //       resumeText:
-    //         '\n\nMervej Raj\n«\nGitlab|\nï\nLinkedIn|\n#\nmervejraj@gmail.com|\nH\n+91 97645 77845\nSummary\nSenior Software Engineer with 8+ years of experience in backend development,  system design,  and scalable\narchitectures.   Expert  in  building  high-performance,  event-driven  microservices  and  leading  cross-functional\nteams.  Strong advocate for automation, DevOps integration, and clean, maintainable code.\nWork Experience\nInnovaccer, Noida — Software EngineerSep 2025 – Present\n–  Builtscalable backend systemsfor  the  Cured  team  to  orchestratemulti-channel healthcare mar-\nketing campaigns,  implementingaudience segmentation,template management,  andreal-time\nanalytics APIsthat enable automated outreach viaSMS, email, and IVRacross multiple clients.\nBajaj Finserv Health, Pune — Principal Software EngineerMar 2023 – Sep 2025\n–  Migratedmonolith to microservicesandmonorepo architecturewithKafkaandAzure Service\nBus— reducing deployment time by30%, improving scalability by20%, cutting downtime by12%, and\nincreasing throughput by15%.\n–  Createdend-to-end payment reconciliation systemachieving100% transaction tracking accuracy\nand50% faster reconciliation.  Improved payment success to95%and payout success to99%.\n–  Led engineering team, mentoring onarchitecture, delivery, andcross-functional collaboration.\nBookMyShow, Mumbai — Software Development Engineer IIJul 2021 – Mar 2023\n–  DeliveredBMS Play Credit CardwithRBL Bank,RBI mandate card tokenisation,  andAPI\nintegrationswith SBI and RBL for bank offers, boosting engagement by25%.\n–  Builtbackend and CMSfor BMS offers withAPI governanceinNode.jsandGolang— improving\nefficiency  by20%,  accelerating  rollouts  by15%,  enhancing  reliability  by30%,  and  reducing  latency  by\n20%.\nTerribly Tiny Tales, Mumbai — Senior Software EngineerApr 2019 – Jul 2021\n–  Developedbackend applicationswithNode.js, MySQL, Redis,  andElasticsearch,  and  designed\nsubscription-based payment systemusingRazorpaywith recurring billing — improving performance\nby25%.\nLivelike, Gurugram — Software DeveloperJun 2017 – Mar 2019\n–  Developed  and  integratedvirtual reality apps,  enhancing  immersive  experience  offerings  for  multiple\nclients.\nPersonal Projects\nPixel Streaming Demo\nBuilt a WebRTC-based product enabling instant interactivity with 3D apps off-device using Node.js, MySQL,\nReact & AWS. Achieved near-zero download time and low latency, with autoscaling to handle real-time traffic\nsurges.\nEducation\n2013 – 2017    B.Tech, National Institute of Technology, Nagpur\n2010 – 2012    12th, Cotton College, Assam\nSkills & Highlights\nProgrammingNode.js (NestJS, Express) — 6+ yrs; Golang — 4+ yrs\nDatabasesMySQL, PostgreSQL, MongoDB, Elasticsearch, Redis, Aerospike\nFrameworks / ToolsPub-sub, Queues, Mailing, Notifications, Payment Gateways (PayU, Razorpay etc)\nAI & AutomationAI Tools (GitHub Copilot, Cursor, Windsurf), MCP Servers (Postgres, Azure ,AWS,\nGitlab, Context7 etc)\nDevOps / CloudAWS (EC2, ECS, S3), Azure (Pipelines, AKS, Blob Storage), CI/CD Design, Build\nAutomation',
-    //     },
-    //   ],
-    //   {
-    //     name: 'Mervej Raj',
-    //     email: 'mervejraj@gmail.com',
-    //     phone: '+91 97645 77845',
-    //     location: 'Pune, India',
-    //     linkedin: 'https://www.linkedin.com/in/mervejraj/',
-    //     github: 'https://gitlab.com/users/Mervej',
-    //     experience:
-    //       '8+ years of backend and system design experience across healthcare, fintech, and entertainment domains.',
-    //     skills: [
-    //       'Node.js (NestJS, Express)',
-    //       'Golang',
-    //       'MySQL',
-    //       'PostgreSQL',
-    //       'MongoDB',
-    //       'Elasticsearch',
-    //       'Redis',
-    //       'AWS',
-    //       'Azure',
-    //       'Kafka',
-    //       'CI/CD Automation',
-    //       'Microservices Architecture',
-    //       'Event-driven Systems',
-    //     ],
-    //     achievements: [
-    //       'Migrated monolith to microservices architecture reducing deployment time by 30% and increasing scalability by 20%',
-    //       'Built scalable backend systems for healthcare marketing automation',
-    //       'Developed full payment reconciliation system achieving 100% transaction tracking accuracy',
-    //       'Delivered BMS Play Credit Card integration boosting engagement by 25%',
-    //       'Led engineering teams and mentored developers on architecture and delivery best practices',
-    //     ],
-    //   }
-    // );
+    this.processMultipleApplications(
+      [
+        {
+          jobUrl:
+            'https://apply.workable.com/innovaccer-analytics/j/A35FEDD669/?utm_campaign=8cb0e1f428&utm_medium=eps&utm_source=link',
+          coverLetter:
+            "Dear Hiring Manager,\n\nI'm thrilled to apply for the Senior Product Manager position at Innovaccer, where I can leverage my technical expertise and passion for driving innovative solutions in healthcare. With over 8 years of experience in backend development and system design across various domains, including healthcare, fintech, and entertainment, I'm confident that my skills align with the key requirements of this role.\n\nAs a seasoned product management professional, I've had the privilege of working on complex projects, from migrating monoliths to microservices architectures to developing scalable backend systems for healthcare marketing automation. My expertise in building high-performance, event-driven microservices has allowed me to drive initiatives from concept to delivery, ensuring seamless communication across teams.\n\nI'm particularly drawn to Innovaccer's mission to revolutionize healthcare by activating the flow of data and empowering providers, payers, and government organizations. As someone who has worked extensively with healthcare marketing automation, I understand the importance of aligning product vision, goals, and supporting business metrics to achieve success indicators. My experience in defining projects, understanding customer requirements, writing detailed functional and test specifications, and coordinating efforts to scope, schedule, and deploy new features sets me well for this role.\n\nI'm impressed by Innovaccer's commitment to driving intelligent and connected experiences that advance health outcomes. I believe my technical background in Node.js (NestJS, Express), Golang, MySQL, PostgreSQL, MongoDB, Elasticsearch, Redis, AWS, Azure, Kafka, CI/CD Automation, Microservices Architecture, and Event-driven Systems will enable me to effectively work with the engineering team to drive product development.\n\nAs a strong communicator, I've had success in driving large-scale projects cross-functionally with designers, software development engineers, other product managers, and external partners. My experience in defining and conducting market research, gathering information from multiple sources, developing insights, and translating findings into action will allow me to effectively gather requirements from internal and external stakeholders.\n\nI'm excited about the opportunity to join a dynamic team of skilled individuals who transform ideas into real-life solutions. I believe my unique blend of technical expertise, product management skills, and passion for innovation make me an ideal candidate for this role. I look forward to discussing how my experience and skills align with the key requirements of this position.\n\nThank you for considering my application. I've attached my resume for your review.\n\nSincerely,\nMervej Raj",
+          resumePath:
+            '/Users/mervej.raj/Documents/Projects/Personal/job-agent/src/data/resumes/1.pdf',
+          applyLink: 'https://apply.workable.com/innovaccer-analytics/j/A35FEDD669/apply/',
+          resumeText:
+            '\n\nMervej Raj\n«\nGitlab|\nï\nLinkedIn|\n#\nmervejraj@gmail.com|\nH\n+91 97645 77845\nSummary\nSenior Software Engineer with 8+ years of experience in backend development,  system design,  and scalable\narchitectures.   Expert  in  building  high-performance,  event-driven  microservices  and  leading  cross-functional\nteams.  Strong advocate for automation, DevOps integration, and clean, maintainable code.\nWork Experience\nInnovaccer, Noida — Software EngineerSep 2025 – Present\n–  Builtscalable backend systemsfor  the  Cured  team  to  orchestratemulti-channel healthcare mar-\nketing campaigns,  implementingaudience segmentation,template management,  andreal-time\nanalytics APIsthat enable automated outreach viaSMS, email, and IVRacross multiple clients.\nBajaj Finserv Health, Pune — Principal Software EngineerMar 2023 – Sep 2025\n–  Migratedmonolith to microservicesandmonorepo architecturewithKafkaandAzure Service\nBus— reducing deployment time by30%, improving scalability by20%, cutting downtime by12%, and\nincreasing throughput by15%.\n–  Createdend-to-end payment reconciliation systemachieving100% transaction tracking accuracy\nand50% faster reconciliation.  Improved payment success to95%and payout success to99%.\n–  Led engineering team, mentoring onarchitecture, delivery, andcross-functional collaboration.\nBookMyShow, Mumbai — Software Development Engineer IIJul 2021 – Mar 2023\n–  DeliveredBMS Play Credit CardwithRBL Bank,RBI mandate card tokenisation,  andAPI\nintegrationswith SBI and RBL for bank offers, boosting engagement by25%.\n–  Builtbackend and CMSfor BMS offers withAPI governanceinNode.jsandGolang— improving\nefficiency  by20%,  accelerating  rollouts  by15%,  enhancing  reliability  by30%,  and  reducing  latency  by\n20%.\nTerribly Tiny Tales, Mumbai — Senior Software EngineerApr 2019 – Jul 2021\n–  Developedbackend applicationswithNode.js, MySQL, Redis,  andElasticsearch,  and  designed\nsubscription-based payment systemusingRazorpaywith recurring billing — improving performance\nby25%.\nLivelike, Gurugram — Software DeveloperJun 2017 – Mar 2019\n–  Developed  and  integratedvirtual reality apps,  enhancing  immersive  experience  offerings  for  multiple\nclients.\nPersonal Projects\nPixel Streaming Demo\nBuilt a WebRTC-based product enabling instant interactivity with 3D apps off-device using Node.js, MySQL,\nReact & AWS. Achieved near-zero download time and low latency, with autoscaling to handle real-time traffic\nsurges.\nEducation\n2013 – 2017    B.Tech, National Institute of Technology, Nagpur\n2010 – 2012    12th, Cotton College, Assam\nSkills & Highlights\nProgrammingNode.js (NestJS, Express) — 6+ yrs; Golang — 4+ yrs\nDatabasesMySQL, PostgreSQL, MongoDB, Elasticsearch, Redis, Aerospike\nFrameworks / ToolsPub-sub, Queues, Mailing, Notifications, Payment Gateways (PayU, Razorpay etc)\nAI & AutomationAI Tools (GitHub Copilot, Cursor, Windsurf), MCP Servers (Postgres, Azure ,AWS,\nGitlab, Context7 etc)\nDevOps / CloudAWS (EC2, ECS, S3), Azure (Pipelines, AKS, Blob Storage), CI/CD Design, Build\nAutomation',
+        },
+        {
+          jobUrl:
+            'https://stripe.com/jobs/listing/software-engineer-operations-platform/7108247?gh_src=73vnei',
+          coverLetter:
+            "Dear Hiring Manager, \n\nI am writing to express my interest in the Software Engineer position at Stripe. As a professional career coach and cover letter expert, I have reviewed the job description and your resume, Mervej Raj, and I am impressed with your experience and skills. Your background in building scalable backend systems for various industries aligns perfectly with Stripe's mission to increase the global economy's GDP.\n\nI was particularly drawn to your experience in microservices architecture, as it demonstrates your ability to design and deliver high-performance systems. Your success in reducing deployment time by 30% and improving scalability by 20% is impressive, and I believe you could make a significant impact at Stripe.\n\nYour passion for automation, DevOps integration, and clean, maintainable code also resonated with me. As a platform that relies on secure and reliable systems, Stripe must prioritize these values in its engineering practices. Your experience leading engineering teams and mentoring developers on architecture and delivery best practices suggests that you could thrive in a collaborative and supportive work environment like Stripe's.\n\nIn addition to your technical skills, I appreciate your ability to communicate complex ideas clearly and effectively. Your writing style is engaging, professional, and tailored to the specific role and company, which is essential for making a strong first impression at Stripe.\n\nBased on my analysis of your resume and cover letter, I believe you have the skills, experience, and passion necessary to excel as a Software Engineer at Stripe. I highly recommend you for this position and look forward to seeing how you will contribute to the company's mission.\n\nSincerely,\n[Your Name]",
+          resumePath:
+            '/Users/mervej.raj/Documents/Projects/Personal/job-agent/src/data/resumes/1.pdf',
+          applyLink:
+            'https://stripe.com/jobs/listing/software-engineer-operations-platform/7108247/apply?gh_src=73vnei',
+          resumeText:
+            '\n\nMervej Raj\n«\nGitlab|\nï\nLinkedIn|\n#\nmervejraj@gmail.com|\nH\n+91 97645 77845\nSummary\nSenior Software Engineer with 8+ years of experience in backend development,  system design,  and scalable\narchitectures.   Expert  in  building  high-performance,  event-driven  microservices  and  leading  cross-functional\nteams.  Strong advocate for automation, DevOps integration, and clean, maintainable code.\nWork Experience\nInnovaccer, Noida — Software EngineerSep 2025 – Present\n–  Builtscalable backend systemsfor  the  Cured  team  to  orchestratemulti-channel healthcare mar-\nketing campaigns,  implementingaudience segmentation,template management,  andreal-time\nanalytics APIsthat enable automated outreach viaSMS, email, and IVRacross multiple clients.\nBajaj Finserv Health, Pune — Principal Software EngineerMar 2023 – Sep 2025\n–  Migratedmonolith to microservicesandmonorepo architecturewithKafkaandAzure Service\nBus— reducing deployment time by30%, improving scalability by20%, cutting downtime by12%, and\nincreasing throughput by15%.\n–  Createdend-to-end payment reconciliation systemachieving100% transaction tracking accuracy\nand50% faster reconciliation.  Improved payment success to95%and payout success to99%.\n–  Led engineering team, mentoring onarchitecture, delivery, andcross-functional collaboration.\nBookMyShow, Mumbai — Software Development Engineer IIJul 2021 – Mar 2023\n–  DeliveredBMS Play Credit CardwithRBL Bank,RBI mandate card tokenisation,  andAPI\nintegrationswith SBI and RBL for bank offers, boosting engagement by25%.\n–  Builtbackend and CMSfor BMS offers withAPI governanceinNode.jsandGolang— improving\nefficiency  by20%,  accelerating  rollouts  by15%,  enhancing  reliability  by30%,  and  reducing  latency  by\n20%.\nTerribly Tiny Tales, Mumbai — Senior Software EngineerApr 2019 – Jul 2021\n–  Developedbackend applicationswithNode.js, MySQL, Redis,  andElasticsearch,  and  designed\nsubscription-based payment systemusingRazorpaywith recurring billing — improving performance\nby25%.\nLivelike, Gurugram — Software DeveloperJun 2017 – Mar 2019\n–  Developed  and  integratedvirtual reality apps,  enhancing  immersive  experience  offerings  for  multiple\nclients.\nPersonal Projects\nPixel Streaming Demo\nBuilt a WebRTC-based product enabling instant interactivity with 3D apps off-device using Node.js, MySQL,\nReact & AWS. Achieved near-zero download time and low latency, with autoscaling to handle real-time traffic\nsurges.\nEducation\n2013 – 2017    B.Tech, National Institute of Technology, Nagpur\n2010 – 2012    12th, Cotton College, Assam\nSkills & Highlights\nProgrammingNode.js (NestJS, Express) — 6+ yrs; Golang — 4+ yrs\nDatabasesMySQL, PostgreSQL, MongoDB, Elasticsearch, Redis, Aerospike\nFrameworks / ToolsPub-sub, Queues, Mailing, Notifications, Payment Gateways (PayU, Razorpay etc)\nAI & AutomationAI Tools (GitHub Copilot, Cursor, Windsurf), MCP Servers (Postgres, Azure ,AWS,\nGitlab, Context7 etc)\nDevOps / CloudAWS (EC2, ECS, S3), Azure (Pipelines, AKS, Blob Storage), CI/CD Design, Build\nAutomation',
+        },
+      ],
+      {
+        name: 'Mervej Raj',
+        email: 'mervejraj@gmail.com',
+        phone: '+91 97645 77845',
+        location: 'Pune, India',
+        linkedin: 'https://www.linkedin.com/in/mervejraj/',
+        github: 'https://gitlab.com/users/Mervej',
+        experience:
+          '8+ years of backend and system design experience across healthcare, fintech, and entertainment domains.',
+        skills: [
+          'Node.js (NestJS, Express)',
+          'Golang',
+          'MySQL',
+          'PostgreSQL',
+          'MongoDB',
+          'Elasticsearch',
+          'Redis',
+          'AWS',
+          'Azure',
+          'Kafka',
+          'CI/CD Automation',
+          'Microservices Architecture',
+          'Event-driven Systems',
+        ],
+        achievements: [
+          'Migrated monolith to microservices architecture reducing deployment time by 30% and increasing scalability by 20%',
+          'Built scalable backend systems for healthcare marketing automation',
+          'Developed full payment reconciliation system achieving 100% transaction tracking accuracy',
+          'Delivered BMS Play Credit Card integration boosting engagement by 25%',
+          'Led engineering teams and mentored developers on architecture and delivery best practices',
+        ],
+      }
+    );
   }
 
   async close() {
@@ -216,15 +216,18 @@ export class ApplicationFiller {
 
           const type = tagName === 'input' ? inputEl.type || 'text' : tagName;
 
-          // Skip hidden, submit, button, file inputs
+          // Skip hidden, submit, button inputs (but keep file inputs for resume/cover letter)
           if (
             (tagName === 'input' &&
-              (type === 'hidden' || type === 'submit' || type === 'button' || type === 'file')) ||
+              (type === 'hidden' || type === 'submit' || type === 'button')) ||
             (inputEl as any).style?.display === 'none' ||
             element.getAttribute('aria-hidden') === 'true'
           ) {
             return;
           }
+
+          // For file inputs, include them (they'll be handled specially for resume/cover letter)
+          // Don't skip file inputs - they need to be parsed and handled
 
           const required = !!(
             (tagName === 'input' && inputEl.required) ||
@@ -444,7 +447,7 @@ export class ApplicationFiller {
       mappings.push({ field, mappedData, needsAI, aiPrompt });
     }
 
-    // Process AI mappings
+    // Process AI mappings with timeout to prevent hanging
     for (const mapping of mappings) {
       if (mapping.needsAI && !mapping.mappedData && mapping.aiPrompt) {
         try {
@@ -453,11 +456,32 @@ export class ApplicationFiller {
               mapping.field.label || mapping.field.placeholder
             }`
           );
-          mapping.mappedData = await generateText(
+
+          // Add timeout to prevent hanging
+          const aiPromise = generateText(
             'You are an assistant helping fill out job application forms.',
             mapping.aiPrompt
           );
-          console.log(`[DEV] AI generated: "${mapping.mappedData}"`);
+
+          const timeoutPromise = new Promise<string>((_, reject) => {
+            setTimeout(() => reject(new Error('AI call timeout')), 10000); // 10 second timeout
+          });
+
+          let aiResponse: string;
+          try {
+            aiResponse = await Promise.race([aiPromise, timeoutPromise]);
+          } catch (timeoutError) {
+            console.log(
+              `[DEV] AI call timed out for field ${mapping.field.fieldName}, using fallback`
+            );
+            aiResponse = '';
+          }
+
+          // Transform AI response to match field type
+          mapping.mappedData = this.transformValueForFieldType(aiResponse, mapping.field);
+          console.log(
+            `[DEV] AI generated: "${aiResponse}" -> transformed to: "${mapping.mappedData}"`
+          );
         } catch (error) {
           console.log(
             `[DEV] AI generation failed for field ${mapping.field.fieldName}:`,
@@ -465,6 +489,9 @@ export class ApplicationFiller {
           );
           mapping.mappedData = '';
         }
+      } else if (mapping.mappedData) {
+        // Transform even non-AI data to ensure it matches field type
+        mapping.mappedData = this.transformValueForFieldType(mapping.mappedData, mapping.field);
       }
     }
 
@@ -479,12 +506,298 @@ export class ApplicationFiller {
     return undefined;
   }
 
+  /**
+   * Transform AI response to match expected field type
+   */
+  private transformValueForFieldType(
+    value: string | undefined,
+    field: ParsedField
+  ): string | undefined {
+    if (!value) return value;
+
+    const inputType = field.inputType?.toLowerCase();
+    const fieldName = field.fieldName.toLowerCase();
+    const label = (field.label || '').toLowerCase();
+    const placeholder = (field.placeholder || '').toLowerCase();
+    const combined = `${fieldName} ${label} ${placeholder}`;
+
+    // Date fields - ensure YYYY-MM-DD format
+    if (inputType === 'date' || inputType === 'datetime-local' || combined.includes('date')) {
+      try {
+        // Clean up AI responses that include format hints like "mm/yyyy: 31/07/2023"
+        let cleanValue = value
+          .replace(/^(?:mm\/yyyy|yyyy\/mm|dd\/mm\/yyyy|mm\/dd\/yyyy|yyyy-mm-dd)[:\s]*/i, '')
+          .trim();
+
+        // First try to extract existing YYYY-MM-DD format
+        const dateMatch = cleanValue.match(/(\d{4}-\d{2}-\d{2})/);
+        if (dateMatch) {
+          return dateMatch[1];
+        }
+
+        // Handle various date formats: DD/MM/YYYY, MM/DD/YYYY, DD-MM-YYYY, etc.
+        const formats = [
+          /(\d{1,2})\/(\d{1,2})\/(\d{4})/, // DD/MM/YYYY or MM/DD/YYYY
+          /(\d{1,2})-(\d{1,2})-(\d{4})/, // DD-MM-YYYY or MM-DD-YYYY
+          /(\d{4})\/(\d{1,2})\/(\d{1,2})/, // YYYY/MM/DD
+          /(\d{4})-(\d{1,2})-(\d{1,2})/, // YYYY-MM-DD
+        ];
+
+        for (const format of formats) {
+          const match = cleanValue.match(format);
+          if (match) {
+            let year, month, day;
+
+            if (match[1].length === 4) {
+              // YYYY/MM/DD or YYYY-MM-DD format
+              [year, month, day] = [match[1], match[2], match[3]];
+            } else {
+              // Try to determine if it's MM/DD/YYYY or DD/MM/YYYY
+              // For end_date, it's likely DD/MM/YYYY
+              if (combined.includes('end') || combined.includes('to')) {
+                // Assume DD/MM/YYYY for end dates
+                [day, month, year] = [match[1], match[2], match[3]];
+              } else {
+                // For start dates, assume MM/DD/YYYY
+                [month, day, year] = [match[1], match[2], match[3]];
+              }
+            }
+
+            // Validate and format
+            const monthNum = parseInt(month, 10);
+            const dayNum = parseInt(day, 10);
+            const yearNum = parseInt(year, 10);
+
+            if (
+              monthNum >= 1 &&
+              monthNum <= 12 &&
+              dayNum >= 1 &&
+              dayNum <= 31 &&
+              yearNum > 1900 &&
+              yearNum < 2100
+            ) {
+              return `${yearNum.toString().padStart(4, '0')}-${monthNum.toString().padStart(2, '0')}-${dayNum.toString().padStart(2, '0')}`;
+            }
+          }
+        }
+
+        // Try parsing relative dates
+        const lowerValue = cleanValue.toLowerCase();
+        if (
+          lowerValue.includes('week') ||
+          lowerValue.includes('month') ||
+          lowerValue.includes('present') ||
+          lowerValue.includes('current')
+        ) {
+          if (
+            lowerValue.includes('present') ||
+            lowerValue.includes('current') ||
+            lowerValue.includes('now')
+          ) {
+            return new Date().toISOString().split('T')[0];
+          }
+
+          const weeksMatch = cleanValue.match(/(\d+)\s*weeks?/i);
+          const monthsMatch = cleanValue.match(/(\d+)\s*months?/i);
+          if (weeksMatch) {
+            const weeks = parseInt(weeksMatch[1], 10);
+            const date = new Date();
+            date.setDate(date.getDate() + weeks * 7);
+            return date.toISOString().split('T')[0];
+          }
+          if (monthsMatch) {
+            const months = parseInt(monthsMatch[1], 10);
+            const date = new Date();
+            date.setMonth(date.getMonth() + months);
+            return date.toISOString().split('T')[0];
+          }
+        }
+
+        // Try parsing as general date string
+        const parsed = new Date(cleanValue);
+        if (!isNaN(parsed.getTime())) {
+          return parsed.toISOString().split('T')[0];
+        }
+
+        console.log(
+          `[DEV] Could not parse date: "${cleanValue}" (original: "${value}"), using current date`
+        );
+      } catch (e) {
+        console.log(`[DEV] Error parsing date "${value}": ${e}`);
+      }
+
+      // Fallback to current date if parsing fails
+      return new Date().toISOString().split('T')[0];
+    }
+
+    // Number fields
+    if (inputType === 'number' || combined.includes('year') || combined.includes('experience')) {
+      const numMatch = value.match(/(\d+(?:\.\d+)?)/);
+      if (numMatch) {
+        return numMatch[1];
+      }
+    }
+
+    // Email fields
+    if (inputType === 'email' || combined.includes('email')) {
+      const emailMatch = value.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+      if (emailMatch) {
+        return emailMatch[1];
+      }
+    }
+
+    // URL fields
+    if (
+      inputType === 'url' ||
+      combined.includes('url') ||
+      combined.includes('website') ||
+      combined.includes('linkedin') ||
+      combined.includes('github')
+    ) {
+      if (!value.startsWith('http://') && !value.startsWith('https://')) {
+        if (value.includes('linkedin.com') || value.includes('github.com')) {
+          return `https://${value}`;
+        }
+      }
+      return value;
+    }
+
+    // Tel/Phone fields
+    if (inputType === 'tel' || combined.includes('phone') || combined.includes('mobile')) {
+      // Remove non-digit characters except +, spaces, and hyphens
+      return value.replace(/[^\d+\s-]/g, '');
+    }
+
+    return value.trim();
+  }
+
+  /**
+   * Handle date input fields - fill date and handle date picker modals
+   */
+  private async fillDateField(
+    context: Page | Frame,
+    field: ParsedField,
+    mappedData: string | undefined
+  ): Promise<boolean> {
+    try {
+      const el = await context.$(field.selector);
+      if (!el || !mappedData) return false;
+
+      // Transform the date value to ensure proper format
+      let dateValue = this.transformValueForFieldType(mappedData, field);
+      if (!dateValue || !dateValue.match(/^\d{4}-\d{2}-\d{2}/)) {
+        // Fallback: use current date
+        dateValue = new Date().toISOString().split('T')[0];
+      }
+
+      // Try direct fill first (without clicking to avoid opening picker)
+      try {
+        // Clear field first
+        await el.click({ clickCount: 3 }); // Triple click to select all
+        await context.waitForTimeout(100);
+        await el.fill(dateValue);
+        await context.waitForTimeout(200);
+
+        // Verify the value was set
+        const currentValue = await el.inputValue();
+        if (currentValue === dateValue) {
+          console.log(`[DEV] Filled date field "${field.fieldName}": "${dateValue}"`);
+          return true;
+        }
+      } catch (error) {
+        console.log(`[DEV] Direct fill failed, trying alternative method...`);
+      }
+
+      // Alternative: Use JavaScript to set value directly
+      try {
+        await el.evaluate((element: HTMLInputElement, value: string) => {
+          element.value = value;
+          element.dispatchEvent(new Event('input', { bubbles: true }));
+          element.dispatchEvent(new Event('change', { bubbles: true }));
+        }, dateValue);
+        await context.waitForTimeout(200);
+        console.log(`[DEV] Filled date field "${field.fieldName}" via JavaScript: "${dateValue}"`);
+        return true;
+      } catch (error) {
+        console.log(`[DEV] JavaScript fill failed, checking for date picker...`);
+      }
+
+      // If above methods fail, handle date picker modal
+      try {
+        await el.click();
+        await context.waitForTimeout(300);
+
+        // Check if date picker modal opened
+        const datePickerSelectors = [
+          '[role="dialog"]',
+          '.datepicker',
+          '.calendar',
+          '[class*="date-picker"]',
+          '[class*="datepicker"]',
+          '[class*="calendar"]',
+          '[id*="datepicker"]',
+          '[id*="calendar"]',
+          '[class*="ui-datepicker"]',
+          '[class*="flatpickr"]',
+        ];
+
+        let pickerFound = false;
+        for (const pickerSelector of datePickerSelectors) {
+          try {
+            const picker = await context.$(pickerSelector);
+            if (picker && (await picker.isVisible().catch(() => false))) {
+              pickerFound = true;
+              console.log(`[DEV] Date picker modal detected, closing it...`);
+
+              // Try multiple methods to close picker
+              try {
+                await el.press('Escape');
+                await context.waitForTimeout(200);
+              } catch (e) {
+                // Try clicking outside
+                try {
+                  await context.click('body', { position: { x: 10, y: 10 } });
+                  await context.waitForTimeout(200);
+                } catch (e2) {
+                  // Try pressing Enter (might select today's date)
+                  await el.press('Enter');
+                  await context.waitForTimeout(200);
+                }
+              }
+              break;
+            }
+          } catch (e) {
+            // Continue
+          }
+        }
+
+        // After closing picker (or if no picker), try filling again
+        await el.evaluate((element: HTMLInputElement, value: string) => {
+          element.value = value;
+          element.dispatchEvent(new Event('input', { bubbles: true }));
+          element.dispatchEvent(new Event('change', { bubbles: true }));
+        }, dateValue);
+        await context.waitForTimeout(200);
+        console.log(
+          `[DEV] Filled date field "${field.fieldName}" after handling picker: "${dateValue}"`
+        );
+        return true;
+      } catch (error) {
+        console.log(`[DEV] Error handling date picker: ${error}`);
+      }
+    } catch (error) {
+      console.log(`[DEV] Error filling date field "${field.fieldName}": ${error}`);
+    }
+    return false;
+  }
+
   private async selectBestOption(
     page: Page,
     selector: string,
     options: ParsedFieldOption[] | undefined,
     desired: string | undefined,
-    frame?: Frame
+    frame?: Frame,
+    fieldLabel?: string
   ): Promise<boolean> {
     try {
       // Get the appropriate context (main page or iframe)
@@ -493,6 +806,39 @@ export class ApplicationFiller {
       const el = await context.$(selector);
       if (!el || !options || options.length === 0) return false;
       const target = (desired || '').toLowerCase().trim();
+
+      // If no desired value but we have options, use AI to select best option
+      if (!target && options.length > 0) {
+        try {
+          const optionsText = options
+            .map((o, i) => `${i + 1}. ${o.text} (value: ${o.value})`)
+            .join('\n');
+          const aiPrompt = `Given this dropdown field "${fieldLabel || 'field'}" with the following options:\n${optionsText}\n\nBased on the resume context, select the BEST option number (1-${options.length}) that most accurately represents the candidate's situation. Respond with ONLY the number.`;
+
+          // Add timeout to prevent hanging
+          const aiPromise = generateText(
+            'You are an assistant helping fill out job application forms. Select the best option from dropdowns.',
+            aiPrompt
+          );
+
+          const timeoutPromise = new Promise<string>((_, reject) => {
+            setTimeout(() => reject(new Error('AI timeout')), 8000); // 8 second timeout
+          });
+
+          const aiResponse = await Promise.race([aiPromise, timeoutPromise]);
+          const selectedIndex = parseInt(aiResponse.trim().match(/\d+/)?.[0] || '1', 10) - 1;
+
+          if (selectedIndex >= 0 && selectedIndex < options.length) {
+            await el.selectOption({ value: options[selectedIndex].value });
+            console.log(
+              `[DEV] AI selected option "${options[selectedIndex].text}" (index ${selectedIndex + 1}) for "${fieldLabel || selector}"`
+            );
+            return true;
+          }
+        } catch (aiError) {
+          console.log(`[DEV] AI selection failed, falling back to heuristics: ${aiError}`);
+        }
+      }
 
       // Try exact match by text or value
       let match = options.find(
@@ -538,16 +884,95 @@ export class ApplicationFiller {
         }
       }
 
+      // If still no match and we have a desired value, use AI to match
+      if (!match && target && options.length > 0) {
+        try {
+          const optionsText = options
+            .map((o, i) => `${i + 1}. ${o.text} (value: ${o.value})`)
+            .join('\n');
+          const aiPrompt = `Given this dropdown field "${fieldLabel || 'field'}" with desired value "${desired}" and the following options:\n${optionsText}\n\nSelect the BEST option number (1-${options.length}) that matches or is closest to "${desired}". Respond with ONLY the number.`;
+
+          // Add timeout to prevent hanging
+          const aiPromise = generateText(
+            'You are an assistant helping fill out job application forms. Match dropdown options to desired values.',
+            aiPrompt
+          );
+
+          const timeoutPromise = new Promise<string>((_, reject) => {
+            setTimeout(() => reject(new Error('AI timeout')), 8000); // 8 second timeout
+          });
+
+          const aiResponse = await Promise.race([aiPromise, timeoutPromise]);
+          const selectedIndex = parseInt(aiResponse.trim().match(/\d+/)?.[0] || '1', 10) - 1;
+
+          if (selectedIndex >= 0 && selectedIndex < options.length) {
+            match = options[selectedIndex];
+          }
+        } catch (aiError) {
+          console.log(`[DEV] AI matching failed: ${aiError}`);
+        }
+      }
+
       // Last resort: first non-empty option
       if (!match) match = options.find((o) => o.value || o.text);
 
       if (match) {
-        await el.selectOption({ value: match.value });
-        console.log(`[DEV] Selected option "${match.text}" for selector: ${selector}`);
-        return true;
+        // Try multiple methods to select the option with timeout protection
+        try {
+          // Method 1: selectOption by value
+          await el.selectOption({ value: match.value });
+          await context.waitForTimeout(200);
+
+          // Verify selection with timeout
+          try {
+            const verifyPromise = el.evaluate((el: HTMLSelectElement) => el.value);
+            const timeoutPromise = new Promise<string>((_, reject) => {
+              setTimeout(() => reject(new Error('Verification timeout')), 2000);
+            });
+
+            const selectedValue = await Promise.race([verifyPromise, timeoutPromise]);
+            if (selectedValue === match.value) {
+              console.log(
+                `[DEV] Selected option "${match.text}" (value: ${match.value}) for selector: ${selector}`
+              );
+              return true;
+            }
+          } catch (verifyError) {
+            console.log(`[DEV] Verification failed, but assuming selection worked`);
+            return true; // Assume it worked if we got here
+          }
+        } catch (e1) {
+          console.log(`[DEV] selectOption by value failed, trying by label...`);
+        }
+
+        try {
+          // Method 2: selectOption by label
+          await el.selectOption({ label: match.text });
+          await context.waitForTimeout(200);
+          console.log(`[DEV] Selected option "${match.text}" by label for selector: ${selector}`);
+          return true;
+        } catch (e2) {
+          console.log(`[DEV] selectOption by label failed, trying JavaScript...`);
+        }
+
+        try {
+          // Method 3: JavaScript direct assignment
+          await el.evaluate((element: HTMLSelectElement, value: string) => {
+            element.value = value;
+            element.dispatchEvent(new Event('change', { bubbles: true }));
+            element.dispatchEvent(new Event('input', { bubbles: true }));
+          }, match.value);
+          await context.waitForTimeout(200);
+          console.log(
+            `[DEV] Selected option "${match.text}" via JavaScript for selector: ${selector}`
+          );
+          return true;
+        } catch (e3) {
+          console.log(`[DEV] JavaScript selection failed`);
+        }
       }
     } catch (e) {
-      // ignore
+      console.log(`[DEV] Error selecting option: ${e}`);
     }
     return false;
   }
@@ -732,8 +1157,19 @@ export class ApplicationFiller {
               field.selector,
               field.options,
               mappedData,
-              field.frame
+              field.frame,
+              field.label || field.placeholder
             );
+            continue;
+          }
+
+          // Handle date inputs
+          if (
+            field.elementType === 'input' &&
+            (field.inputType === 'date' || field.inputType === 'datetime-local')
+          ) {
+            const context: Frame | Page = field.frame || page;
+            await this.fillDateField(context, field, mappedData);
             continue;
           }
 
@@ -861,6 +1297,50 @@ export class ApplicationFiller {
                   }
                 }
 
+                // Sixth try: Use AI to select best radio option
+                if (!clicked && field.options && field.options.length > 0) {
+                  try {
+                    const optionsText = field.options
+                      .map((o, i) => `${i + 1}. ${o.text} (value: ${o.value})`)
+                      .join('\n');
+                    const fieldLabel = field.label || field.placeholder || field.fieldName;
+                    const aiPrompt = mappedData
+                      ? `Given this radio button field "${fieldLabel}" with desired value "${mappedData}" and the following options:\n${optionsText}\n\nSelect the BEST option number (1-${field.options.length}) that matches or is closest to "${mappedData}". Respond with ONLY the number.`
+                      : `Given this radio button field "${fieldLabel}" with the following options:\n${optionsText}\n\nBased on the resume context, select the BEST option number (1-${field.options.length}) that most accurately represents the candidate's situation. Respond with ONLY the number.`;
+
+                    // Add timeout to prevent hanging
+                    const aiPromise = generateText(
+                      'You are an assistant helping fill out job application forms. Select the best option from radio buttons.',
+                      aiPrompt
+                    );
+
+                    const timeoutPromise = new Promise<string>((_, reject) => {
+                      setTimeout(() => reject(new Error('AI timeout')), 8000); // 8 second timeout
+                    });
+
+                    const aiResponse = await Promise.race([aiPromise, timeoutPromise]);
+
+                    const selectedIndex =
+                      parseInt(aiResponse.trim().match(/\d+/)?.[0] || '1', 10) - 1;
+                    if (
+                      selectedIndex >= 0 &&
+                      selectedIndex < field.options.length &&
+                      selectedIndex < radios.length
+                    ) {
+                      await radios[selectedIndex].click();
+                      const value =
+                        (await radios[selectedIndex].getAttribute('value')) ||
+                        field.options[selectedIndex].value;
+                      console.log(
+                        `[DEV] AI selected radio "${value}" (option ${selectedIndex + 1}) for "${name}"`
+                      );
+                      clicked = true;
+                    }
+                  } catch (aiError) {
+                    console.log(`[DEV] AI selection for radio failed: ${aiError}`);
+                  }
+                }
+
                 // Final fallback: select first option
                 if (!clicked) {
                   await radios[0].click();
@@ -872,23 +1352,89 @@ export class ApplicationFiller {
             continue;
           }
 
+          // Handle resume/cover letter - check if it's a file input or text input
+          const fieldInfo =
+            `${field.label || ''} ${field.placeholder || ''} ${field.fieldName}`.toLowerCase();
+          const isResumeField = fieldInfo.includes('resume') || fieldInfo.includes('cv');
+          const isCoverLetterField = fieldInfo.includes('cover') && fieldInfo.includes('letter');
+
+          if (isResumeField || isCoverLetterField) {
+            const context: Frame | Page = field.frame || page;
+            const el = await context.$(field.selector);
+
+            if (el) {
+              // Check if it's a file input
+              const tagName = await el.evaluate((el: Element) => el.tagName.toLowerCase());
+              const inputType = await el.getAttribute('type');
+
+              if (tagName === 'input' && inputType === 'file') {
+                // It's a file input - upload file
+                if (isResumeField && resumePath) {
+                  try {
+                    await el.setInputFiles(resumePath);
+                    console.log(`[DEV] Uploaded resume file: "${resumePath}"`);
+                  } catch (error) {
+                    console.log(`[DEV] Error uploading resume file: ${error}`);
+                  }
+                } else if (isCoverLetterField) {
+                  // Cover letter as file - create a temporary file if needed
+                  // For now, skip file upload for cover letter (usually text)
+                  console.log(
+                    `[DEV] Cover letter field is file input, but cover letter is text - skipping`
+                  );
+                }
+              } else {
+                // It's a text input/textarea - fill with text
+                if (isCoverLetterField && coverLetter) {
+                  try {
+                    await el.fill(coverLetter);
+                    console.log(`[DEV] Filled cover letter text field`);
+                    coverLetterFilled = true;
+                  } catch (error) {
+                    console.log(`[DEV] Error filling cover letter: ${error}`);
+                  }
+                } else if (isResumeField) {
+                  // Resume field as text - might be a resume URL or text field
+                  // For now, skip (resume should be uploaded as file)
+                  console.log(
+                    `[DEV] Resume field is text input, but resume should be uploaded as file - skipping`
+                  );
+                }
+              }
+            }
+            continue;
+          }
+
           // Default: fill text-like inputs and textareas
           if (mappedData) {
             const context: Frame | Page = field.frame || page;
             const el = await context.$(field.selector);
             if (el) {
-              await el.fill(mappedData);
-              console.log(
-                `[DEV] Filled field "${field.fieldName}": "${mappedData.substring(0, 120)}${
-                  mappedData.length > 120 ? '...' : ''
-                }"`
-              );
+              // Transform value before filling
+              const transformedValue = this.transformValueForFieldType(mappedData, field);
 
-              // Track if cover letter was filled
-              const fieldInfo =
-                `${field.label || ''} ${field.placeholder || ''} ${field.fieldName}`.toLowerCase();
-              if (fieldInfo.includes('cover') && fieldInfo.includes('letter')) {
-                coverLetterFilled = true;
+              try {
+                await el.fill(transformedValue || mappedData);
+                console.log(
+                  `[DEV] Filled field "${field.fieldName}": "${(transformedValue || mappedData).substring(0, 120)}${
+                    (transformedValue || mappedData).length > 120 ? '...' : ''
+                  }"`
+                );
+              } catch (error) {
+                // Try using JavaScript if fill fails
+                try {
+                  await el.evaluate(
+                    (element: HTMLInputElement | HTMLTextAreaElement, value: string) => {
+                      element.value = value;
+                      element.dispatchEvent(new Event('input', { bubbles: true }));
+                      element.dispatchEvent(new Event('change', { bubbles: true }));
+                    },
+                    transformedValue || mappedData
+                  );
+                  console.log(`[DEV] Filled field "${field.fieldName}" via JavaScript`);
+                } catch (jsError) {
+                  console.log(`[DEV] Error filling field "${field.fieldName}": ${jsError}`);
+                }
               }
             } else {
               console.log(`[DEV] Could not find element for field: ${field.fieldName}`);
@@ -1366,8 +1912,19 @@ export class ApplicationFiller {
               field.selector,
               field.options,
               mappedData,
-              field.frame
+              field.frame,
+              field.label || field.placeholder
             );
+            continue;
+          }
+
+          // Handle date inputs
+          if (
+            field.elementType === 'input' &&
+            (field.inputType === 'date' || field.inputType === 'datetime-local')
+          ) {
+            const context: Frame | Page = field.frame || page;
+            await this.fillDateField(context, field, mappedData);
             continue;
           }
 
@@ -1495,6 +2052,50 @@ export class ApplicationFiller {
                   }
                 }
 
+                // Sixth try: Use AI to select best radio option
+                if (!clicked && field.options && field.options.length > 0) {
+                  try {
+                    const optionsText = field.options
+                      .map((o, i) => `${i + 1}. ${o.text} (value: ${o.value})`)
+                      .join('\n');
+                    const fieldLabel = field.label || field.placeholder || field.fieldName;
+                    const aiPrompt = mappedData
+                      ? `Given this radio button field "${fieldLabel}" with desired value "${mappedData}" and the following options:\n${optionsText}\n\nSelect the BEST option number (1-${field.options.length}) that matches or is closest to "${mappedData}". Respond with ONLY the number.`
+                      : `Given this radio button field "${fieldLabel}" with the following options:\n${optionsText}\n\nBased on the resume context, select the BEST option number (1-${field.options.length}) that most accurately represents the candidate's situation. Respond with ONLY the number.`;
+
+                    // Add timeout to prevent hanging
+                    const aiPromise = generateText(
+                      'You are an assistant helping fill out job application forms. Select the best option from radio buttons.',
+                      aiPrompt
+                    );
+
+                    const timeoutPromise = new Promise<string>((_, reject) => {
+                      setTimeout(() => reject(new Error('AI timeout')), 8000); // 8 second timeout
+                    });
+
+                    const aiResponse = await Promise.race([aiPromise, timeoutPromise]);
+
+                    const selectedIndex =
+                      parseInt(aiResponse.trim().match(/\d+/)?.[0] || '1', 10) - 1;
+                    if (
+                      selectedIndex >= 0 &&
+                      selectedIndex < field.options.length &&
+                      selectedIndex < radios.length
+                    ) {
+                      await radios[selectedIndex].click();
+                      const value =
+                        (await radios[selectedIndex].getAttribute('value')) ||
+                        field.options[selectedIndex].value;
+                      console.log(
+                        `[DEV] AI selected radio "${value}" (option ${selectedIndex + 1}) for "${name}"`
+                      );
+                      clicked = true;
+                    }
+                  } catch (aiError) {
+                    console.log(`[DEV] AI selection for radio failed: ${aiError}`);
+                  }
+                }
+
                 // Final fallback: select first option
                 if (!clicked) {
                   await radios[0].click();
@@ -1506,23 +2107,89 @@ export class ApplicationFiller {
             continue;
           }
 
+          // Handle resume/cover letter - check if it's a file input or text input
+          const fieldInfo =
+            `${field.label || ''} ${field.placeholder || ''} ${field.fieldName}`.toLowerCase();
+          const isResumeField = fieldInfo.includes('resume') || fieldInfo.includes('cv');
+          const isCoverLetterField = fieldInfo.includes('cover') && fieldInfo.includes('letter');
+
+          if (isResumeField || isCoverLetterField) {
+            const context: Frame | Page = field.frame || page;
+            const el = await context.$(field.selector);
+
+            if (el) {
+              // Check if it's a file input
+              const tagName = await el.evaluate((el: Element) => el.tagName.toLowerCase());
+              const inputType = await el.getAttribute('type');
+
+              if (tagName === 'input' && inputType === 'file') {
+                // It's a file input - upload file
+                if (isResumeField && resumePath) {
+                  try {
+                    await el.setInputFiles(resumePath);
+                    console.log(`[DEV] Uploaded resume file: "${resumePath}"`);
+                  } catch (error) {
+                    console.log(`[DEV] Error uploading resume file: ${error}`);
+                  }
+                } else if (isCoverLetterField) {
+                  // Cover letter as file - create a temporary file if needed
+                  // For now, skip file upload for cover letter (usually text)
+                  console.log(
+                    `[DEV] Cover letter field is file input, but cover letter is text - skipping`
+                  );
+                }
+              } else {
+                // It's a text input/textarea - fill with text
+                if (isCoverLetterField && coverLetter) {
+                  try {
+                    await el.fill(coverLetter);
+                    console.log(`[DEV] Filled cover letter text field`);
+                    coverLetterFilled = true;
+                  } catch (error) {
+                    console.log(`[DEV] Error filling cover letter: ${error}`);
+                  }
+                } else if (isResumeField) {
+                  // Resume field as text - might be a resume URL or text field
+                  // For now, skip (resume should be uploaded as file)
+                  console.log(
+                    `[DEV] Resume field is text input, but resume should be uploaded as file - skipping`
+                  );
+                }
+              }
+            }
+            continue;
+          }
+
           // Default: fill text-like inputs and textareas
           if (mappedData) {
             const context: Frame | Page = field.frame || page;
             const el = await context.$(field.selector);
             if (el) {
-              await el.fill(mappedData);
-              console.log(
-                `[DEV] Filled field "${field.fieldName}": "${mappedData.substring(0, 120)}${
-                  mappedData.length > 120 ? '...' : ''
-                }"`
-              );
+              // Transform value before filling
+              const transformedValue = this.transformValueForFieldType(mappedData, field);
 
-              // Track if cover letter was filled
-              const fieldInfo =
-                `${field.label || ''} ${field.placeholder || ''} ${field.fieldName}`.toLowerCase();
-              if (fieldInfo.includes('cover') && fieldInfo.includes('letter')) {
-                coverLetterFilled = true;
+              try {
+                await el.fill(transformedValue || mappedData);
+                console.log(
+                  `[DEV] Filled field "${field.fieldName}": "${(transformedValue || mappedData).substring(0, 120)}${
+                    (transformedValue || mappedData).length > 120 ? '...' : ''
+                  }"`
+                );
+              } catch (error) {
+                // Try using JavaScript if fill fails
+                try {
+                  await el.evaluate(
+                    (element: HTMLInputElement | HTMLTextAreaElement, value: string) => {
+                      element.value = value;
+                      element.dispatchEvent(new Event('input', { bubbles: true }));
+                      element.dispatchEvent(new Event('change', { bubbles: true }));
+                    },
+                    transformedValue || mappedData
+                  );
+                  console.log(`[DEV] Filled field "${field.fieldName}" via JavaScript`);
+                } catch (jsError) {
+                  console.log(`[DEV] Error filling field "${field.fieldName}": ${jsError}`);
+                }
               }
             } else {
               console.log(`[DEV] Could not find element for field: ${field.fieldName}`);
@@ -1743,65 +2410,77 @@ export class ApplicationFiller {
       'input[name*="cv"]',
       'input[id*="resume"]',
       'input[id*="cv"]',
+      'input[accept*="pdf"]',
+      'input[accept*="doc"]',
+      'input[class*="file"]',
+      'input[data-testid*="resume"]',
+      'input[data-testid*="cv"]',
+      'input[aria-label*="resume"]',
+      'input[aria-label*="cv"]',
     ];
 
-    // First try main document
-    for (const selector of fileInputSelectors) {
-      try {
-        const fileInput = await page.$(selector);
-        if (fileInput) {
-          await fileInput.setInputFiles(resumePath);
-          console.log(`[DEV] Uploaded resume: "${resumePath}" (using selector: ${selector})`);
-          return true;
+    // Helper function to try uploading to a context (page or frame)
+    const tryUploadInContext = async (
+      context: Page | Frame,
+      contextName: string
+    ): Promise<boolean> => {
+      // First try standard selectors
+      for (const selector of fileInputSelectors) {
+        try {
+          const fileInput = await context.$(selector);
+          if (fileInput) {
+            // Check if it's visible or if we need to make it visible
+            const isVisible = await fileInput.isVisible().catch(() => false);
+            if (!isVisible) {
+              // Try to make it visible by clicking parent or triggering click
+              try {
+                await fileInput.evaluate((el: HTMLInputElement) => {
+                  el.style.display = 'block';
+                  el.style.visibility = 'visible';
+                  el.style.opacity = '1';
+                });
+              } catch (e) {
+                // Continue anyway
+              }
+            }
+
+            await fileInput.setInputFiles(resumePath);
+            console.log(
+              `[DEV] Uploaded resume: "${resumePath}" (using selector: ${selector} in ${contextName})`
+            );
+            await context.waitForTimeout(500); // Wait for upload to process
+            return true;
+          }
+        } catch (error) {
+          // Continue trying other selectors
         }
-      } catch (error) {
-        // Continue trying other selectors
       }
+
+      // Try keyword-based search
+      const keywordUploaded = await this.searchAndUploadResumeByKeyword(context, resumePath);
+      if (keywordUploaded) {
+        console.log(`[DEV] Uploaded resume via keyword search in ${contextName}`);
+        await context.waitForTimeout(500);
+        return true;
+      }
+
+      return false;
+    };
+
+    // First try main document
+    const mainUploaded = await tryUploadInContext(page, 'main document');
+    if (mainUploaded) {
+      return true;
     }
 
-    // If not found in main document, try iframes
+    // Try iframes recursively
     const iframes = await page.$$('iframe');
     for (let i = 0; i < iframes.length; i++) {
       try {
         const frame = await iframes[i].contentFrame();
         if (frame) {
-          for (const selector of fileInputSelectors) {
-            try {
-              const fileInput = await frame.$(selector);
-              if (fileInput) {
-                await fileInput.setInputFiles(resumePath);
-                console.log(
-                  `[DEV] Uploaded resume: "${resumePath}" (using selector: ${selector} in iframe ${i})`
-                );
-                return true;
-              }
-            } catch (error) {
-              // Continue trying other selectors
-            }
-          }
-        }
-      } catch (error) {
-        // Continue trying other iframes
-      }
-    }
-
-    // Fallback: Search for elements containing "resume" text and try to upload
-    console.log(`[DEV] Standard selectors failed, searching for "resume" keyword elements...`);
-
-    // Search in main document
-    const resumeUploaded = await this.searchAndUploadResumeByKeyword(page, resumePath);
-    if (resumeUploaded) {
-      return true;
-    }
-
-    // Search in iframes
-    for (let i = 0; i < iframes.length; i++) {
-      try {
-        const frame = await iframes[i].contentFrame();
-        if (frame) {
-          const frameResumeUploaded = await this.searchAndUploadResumeByKeyword(frame, resumePath);
-          if (frameResumeUploaded) {
-            console.log(`[DEV] Uploaded resume via keyword search in iframe ${i}`);
+          const frameUploaded = await tryUploadInContext(frame, `iframe ${i}`);
+          if (frameUploaded) {
             return true;
           }
         }
@@ -1810,8 +2489,48 @@ export class ApplicationFiller {
       }
     }
 
+    // Final attempt: Try clicking on any upload button/area and then uploading
+    console.log(`[DEV] Standard methods failed, trying click-then-upload approach...`);
+    try {
+      const uploadButtons = await page.$$(
+        'button[class*="upload"], button[class*="resume"], button[class*="cv"], [role="button"][class*="upload"], [class*="file-upload"], [class*="dropzone"]'
+      );
+
+      for (const button of uploadButtons.slice(0, 3)) {
+        try {
+          const buttonText = await button.textContent();
+          const buttonClass = (await button.getAttribute('class')) || '';
+          const combined = `${buttonText} ${buttonClass}`.toLowerCase();
+
+          if (
+            combined.includes('resume') ||
+            combined.includes('cv') ||
+            combined.includes('upload') ||
+            combined.includes('file')
+          ) {
+            console.log(`[DEV] Clicking upload button: "${buttonText?.trim()}"`);
+            await button.click();
+            await page.waitForTimeout(1000);
+
+            // After clicking, try to find and upload file input
+            const fileInput = await page.$('input[type="file"]');
+            if (fileInput) {
+              await fileInput.setInputFiles(resumePath);
+              console.log(`[DEV] Uploaded resume after clicking upload button`);
+              await page.waitForTimeout(500);
+              return true;
+            }
+          }
+        } catch (error) {
+          // Continue
+        }
+      }
+    } catch (error) {
+      // Ignore
+    }
+
     console.log(
-      `[DEV] Could not find resume upload field - tried selectors: ${fileInputSelectors.join(', ')} and keyword search`
+      `[DEV] Could not find resume upload field - tried all methods including selectors, keyword search, and click-then-upload`
     );
     return false;
   }
