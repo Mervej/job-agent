@@ -1,124 +1,788 @@
 import { chromium, Browser, Page, Frame } from 'playwright';
 import { UserProfile } from './cover-letter-generator';
 import { generateText } from './ai.service';
+import * as os from 'os';
+import * as fs from 'fs';
+import * as path from 'path';
+import { StructuredResume } from './resume';
+import { FormAnalyzerAgent } from '../agents/form-analyzer.agent';
+import { FieldFillerAgent } from '../agents/field-filler.agent';
+import { VerifierAgent } from '../agents/verifier.agent';
+import { HtmlFormExtractorAgent, AIField } from '../agents/html-form-extractor.agent';
 
 export interface ApplicationResult {
   success: boolean;
   error?: string;
   screenshot?: Buffer;
+  screenshotPath?: string;
   submittedAt?: Date;
 }
 
-export interface ParsedFieldOption {
-  value: string;
-  text: string;
-}
+// Types are defined in agents/types.ts — re-exported here for backward compatibility
+export type { ParsedFieldOption, ParsedField, FieldMapping } from '../agents/types';
+import type { ParsedField, FieldMapping, ParsedFieldOption } from '../agents/types';
 
-export interface ParsedField {
-  selector: string;
-  elementType: 'input' | 'textarea' | 'select';
-  inputType?: string; // for inputs: text, email, tel, url, checkbox, radio, date, etc.
-  fieldName: string;
-  placeholder?: string;
-  label?: string;
-  autocomplete?: string;
-  required: boolean;
-  currentValue?: string;
-  options?: ParsedFieldOption[]; // for selects and radios
-  frame?: Frame; // Frame reference if field is inside an iframe
-}
+/**
+ * Builds an AI prompt that asks the model to pick the single best option
+ * from a predefined list. Used for dropdowns, radio groups, and any other
+ * field where only a fixed set of values is valid.
+ */
+function buildOptionsPrompt(
+  question: string,
+  options: ParsedFieldOption[],
+  resumeContext: string,
+  currentValue?: string
+): string {
+  const optionList = options.map((o) => `- ${o.text}`).join('\n');
+  const hint = currentValue
+    ? `The candidate's preferred answer is roughly "${currentValue}", but it must match one of the options below exactly.`
+    : `Choose the option that best fits the candidate's background.`;
 
-export interface FieldMapping {
-  field: ParsedField;
-  mappedData?: string;
-  needsAI: boolean;
-  aiPrompt?: string;
+  return `You are filling a job application form on behalf of the candidate.
+
+Field: ${question}
+
+${hint}
+
+Available options (respond with ONLY the exact text of one option, nothing else):
+${optionList}
+
+Candidate resume:
+${resumeContext}`;
 }
 
 export class ApplicationFiller {
   private browser: Browser | null = null;
+  private formAnalyzer = new FormAnalyzerAgent();
+  private fieldFiller = new FieldFillerAgent();
+  private verifier = new VerifierAgent();
+  private htmlExtractor = new HtmlFormExtractorAgent();
 
   async init() {
+    // Default: show browser window. Set BROWSER_HEADLESS=true to run silently (e.g. production).
+    const headless = process.env.BROWSER_HEADLESS === 'true';
     this.browser = await chromium.launch({
-      headless: false, // Set to false so user can see and verify the form
+      headless,
       args: ['--no-sandbox', '--disable-setuid-sandbox'],
     });
 
-    this.processMultipleApplications(
-      [
-        {
-          jobUrl:
-            'https://apply.workable.com/innovaccer-analytics/j/A35FEDD669/?utm_campaign=8cb0e1f428&utm_medium=eps&utm_source=link',
-          coverLetter:
-            "Dear Hiring Manager,\n\nI'm thrilled to apply for the Senior Product Manager position at Innovaccer, where I can leverage my technical expertise and passion for driving innovative solutions in healthcare. With over 8 years of experience in backend development and system design across various domains, including healthcare, fintech, and entertainment, I'm confident that my skills align with the key requirements of this role.\n\nAs a seasoned product management professional, I've had the privilege of working on complex projects, from migrating monoliths to microservices architectures to developing scalable backend systems for healthcare marketing automation. My expertise in building high-performance, event-driven microservices has allowed me to drive initiatives from concept to delivery, ensuring seamless communication across teams.\n\nI'm particularly drawn to Innovaccer's mission to revolutionize healthcare by activating the flow of data and empowering providers, payers, and government organizations. As someone who has worked extensively with healthcare marketing automation, I understand the importance of aligning product vision, goals, and supporting business metrics to achieve success indicators. My experience in defining projects, understanding customer requirements, writing detailed functional and test specifications, and coordinating efforts to scope, schedule, and deploy new features sets me well for this role.\n\nI'm impressed by Innovaccer's commitment to driving intelligent and connected experiences that advance health outcomes. I believe my technical background in Node.js (NestJS, Express), Golang, MySQL, PostgreSQL, MongoDB, Elasticsearch, Redis, AWS, Azure, Kafka, CI/CD Automation, Microservices Architecture, and Event-driven Systems will enable me to effectively work with the engineering team to drive product development.\n\nAs a strong communicator, I've had success in driving large-scale projects cross-functionally with designers, software development engineers, other product managers, and external partners. My experience in defining and conducting market research, gathering information from multiple sources, developing insights, and translating findings into action will allow me to effectively gather requirements from internal and external stakeholders.\n\nI'm excited about the opportunity to join a dynamic team of skilled individuals who transform ideas into real-life solutions. I believe my unique blend of technical expertise, product management skills, and passion for innovation make me an ideal candidate for this role. I look forward to discussing how my experience and skills align with the key requirements of this position.\n\nThank you for considering my application. I've attached my resume for your review.\n\nSincerely,\nMervej Raj",
-          resumePath:
-            '/Users/mervej.raj/Documents/Projects/Personal/job-agent/src/data/resumes/1.pdf',
-          applyLink: 'https://apply.workable.com/innovaccer-analytics/j/A35FEDD669/apply/',
-          resumeText:
-            '\n\nMervej Raj\n«\nGitlab|\nï\nLinkedIn|\n#\nmervejraj@gmail.com|\nH\n+91 97645 77845\nSummary\nSenior Software Engineer with 8+ years of experience in backend development,  system design,  and scalable\narchitectures.   Expert  in  building  high-performance,  event-driven  microservices  and  leading  cross-functional\nteams.  Strong advocate for automation, DevOps integration, and clean, maintainable code.\nWork Experience\nInnovaccer, Noida — Software EngineerSep 2025 – Present\n–  Builtscalable backend systemsfor  the  Cured  team  to  orchestratemulti-channel healthcare mar-\nketing campaigns,  implementingaudience segmentation,template management,  andreal-time\nanalytics APIsthat enable automated outreach viaSMS, email, and IVRacross multiple clients.\nBajaj Finserv Health, Pune — Principal Software EngineerMar 2023 – Sep 2025\n–  Migratedmonolith to microservicesandmonorepo architecturewithKafkaandAzure Service\nBus— reducing deployment time by30%, improving scalability by20%, cutting downtime by12%, and\nincreasing throughput by15%.\n–  Createdend-to-end payment reconciliation systemachieving100% transaction tracking accuracy\nand50% faster reconciliation.  Improved payment success to95%and payout success to99%.\n–  Led engineering team, mentoring onarchitecture, delivery, andcross-functional collaboration.\nBookMyShow, Mumbai — Software Development Engineer IIJul 2021 – Mar 2023\n–  DeliveredBMS Play Credit CardwithRBL Bank,RBI mandate card tokenisation,  andAPI\nintegrationswith SBI and RBL for bank offers, boosting engagement by25%.\n–  Builtbackend and CMSfor BMS offers withAPI governanceinNode.jsandGolang— improving\nefficiency  by20%,  accelerating  rollouts  by15%,  enhancing  reliability  by30%,  and  reducing  latency  by\n20%.\nTerribly Tiny Tales, Mumbai — Senior Software EngineerApr 2019 – Jul 2021\n–  Developedbackend applicationswithNode.js, MySQL, Redis,  andElasticsearch,  and  designed\nsubscription-based payment systemusingRazorpaywith recurring billing — improving performance\nby25%.\nLivelike, Gurugram — Software DeveloperJun 2017 – Mar 2019\n–  Developed  and  integratedvirtual reality apps,  enhancing  immersive  experience  offerings  for  multiple\nclients.\nPersonal Projects\nPixel Streaming Demo\nBuilt a WebRTC-based product enabling instant interactivity with 3D apps off-device using Node.js, MySQL,\nReact & AWS. Achieved near-zero download time and low latency, with autoscaling to handle real-time traffic\nsurges.\nEducation\n2013 – 2017    B.Tech, National Institute of Technology, Nagpur\n2010 – 2012    12th, Cotton College, Assam\nSkills & Highlights\nProgrammingNode.js (NestJS, Express) — 6+ yrs; Golang — 4+ yrs\nDatabasesMySQL, PostgreSQL, MongoDB, Elasticsearch, Redis, Aerospike\nFrameworks / ToolsPub-sub, Queues, Mailing, Notifications, Payment Gateways (PayU, Razorpay etc)\nAI & AutomationAI Tools (GitHub Copilot, Cursor, Windsurf), MCP Servers (Postgres, Azure ,AWS,\nGitlab, Context7 etc)\nDevOps / CloudAWS (EC2, ECS, S3), Azure (Pipelines, AKS, Blob Storage), CI/CD Design, Build\nAutomation',
-        },
-        {
-          jobUrl:
-            'https://stripe.com/jobs/listing/software-engineer-operations-platform/7108247?gh_src=73vnei',
-          coverLetter:
-            "Dear Hiring Manager, \n\nI am writing to express my interest in the Software Engineer position at Stripe. As a professional career coach and cover letter expert, I have reviewed the job description and your resume, Mervej Raj, and I am impressed with your experience and skills. Your background in building scalable backend systems for various industries aligns perfectly with Stripe's mission to increase the global economy's GDP.\n\nI was particularly drawn to your experience in microservices architecture, as it demonstrates your ability to design and deliver high-performance systems. Your success in reducing deployment time by 30% and improving scalability by 20% is impressive, and I believe you could make a significant impact at Stripe.\n\nYour passion for automation, DevOps integration, and clean, maintainable code also resonated with me. As a platform that relies on secure and reliable systems, Stripe must prioritize these values in its engineering practices. Your experience leading engineering teams and mentoring developers on architecture and delivery best practices suggests that you could thrive in a collaborative and supportive work environment like Stripe's.\n\nIn addition to your technical skills, I appreciate your ability to communicate complex ideas clearly and effectively. Your writing style is engaging, professional, and tailored to the specific role and company, which is essential for making a strong first impression at Stripe.\n\nBased on my analysis of your resume and cover letter, I believe you have the skills, experience, and passion necessary to excel as a Software Engineer at Stripe. I highly recommend you for this position and look forward to seeing how you will contribute to the company's mission.\n\nSincerely,\n[Your Name]",
-          resumePath:
-            '/Users/mervej.raj/Documents/Projects/Personal/job-agent/src/data/resumes/1.pdf',
-          applyLink:
-            'https://stripe.com/jobs/listing/software-engineer-operations-platform/7108247/apply?gh_src=73vnei',
-          resumeText:
-            '\n\nMervej Raj\n«\nGitlab|\nï\nLinkedIn|\n#\nmervejraj@gmail.com|\nH\n+91 97645 77845\nSummary\nSenior Software Engineer with 8+ years of experience in backend development,  system design,  and scalable\narchitectures.   Expert  in  building  high-performance,  event-driven  microservices  and  leading  cross-functional\nteams.  Strong advocate for automation, DevOps integration, and clean, maintainable code.\nWork Experience\nInnovaccer, Noida — Software EngineerSep 2025 – Present\n–  Builtscalable backend systemsfor  the  Cured  team  to  orchestratemulti-channel healthcare mar-\nketing campaigns,  implementingaudience segmentation,template management,  andreal-time\nanalytics APIsthat enable automated outreach viaSMS, email, and IVRacross multiple clients.\nBajaj Finserv Health, Pune — Principal Software EngineerMar 2023 – Sep 2025\n–  Migratedmonolith to microservicesandmonorepo architecturewithKafkaandAzure Service\nBus— reducing deployment time by30%, improving scalability by20%, cutting downtime by12%, and\nincreasing throughput by15%.\n–  Createdend-to-end payment reconciliation systemachieving100% transaction tracking accuracy\nand50% faster reconciliation.  Improved payment success to95%and payout success to99%.\n–  Led engineering team, mentoring onarchitecture, delivery, andcross-functional collaboration.\nBookMyShow, Mumbai — Software Development Engineer IIJul 2021 – Mar 2023\n–  DeliveredBMS Play Credit CardwithRBL Bank,RBI mandate card tokenisation,  andAPI\nintegrationswith SBI and RBL for bank offers, boosting engagement by25%.\n–  Builtbackend and CMSfor BMS offers withAPI governanceinNode.jsandGolang— improving\nefficiency  by20%,  accelerating  rollouts  by15%,  enhancing  reliability  by30%,  and  reducing  latency  by\n20%.\nTerribly Tiny Tales, Mumbai — Senior Software EngineerApr 2019 – Jul 2021\n–  Developedbackend applicationswithNode.js, MySQL, Redis,  andElasticsearch,  and  designed\nsubscription-based payment systemusingRazorpaywith recurring billing — improving performance\nby25%.\nLivelike, Gurugram — Software DeveloperJun 2017 – Mar 2019\n–  Developed  and  integratedvirtual reality apps,  enhancing  immersive  experience  offerings  for  multiple\nclients.\nPersonal Projects\nPixel Streaming Demo\nBuilt a WebRTC-based product enabling instant interactivity with 3D apps off-device using Node.js, MySQL,\nReact & AWS. Achieved near-zero download time and low latency, with autoscaling to handle real-time traffic\nsurges.\nEducation\n2013 – 2017    B.Tech, National Institute of Technology, Nagpur\n2010 – 2012    12th, Cotton College, Assam\nSkills & Highlights\nProgrammingNode.js (NestJS, Express) — 6+ yrs; Golang — 4+ yrs\nDatabasesMySQL, PostgreSQL, MongoDB, Elasticsearch, Redis, Aerospike\nFrameworks / ToolsPub-sub, Queues, Mailing, Notifications, Payment Gateways (PayU, Razorpay etc)\nAI & AutomationAI Tools (GitHub Copilot, Cursor, Windsurf), MCP Servers (Postgres, Azure ,AWS,\nGitlab, Context7 etc)\nDevOps / CloudAWS (EC2, ECS, S3), Azure (Pipelines, AKS, Blob Storage), CI/CD Design, Build\nAutomation',
-        },
-      ],
-      {
-        name: 'Mervej Raj',
-        email: 'mervejraj@gmail.com',
-        phone: '+91 97645 77845',
-        location: 'Pune, India',
-        linkedin: 'https://www.linkedin.com/in/mervejraj/',
-        github: 'https://gitlab.com/users/Mervej',
-        experience:
-          '8+ years of backend and system design experience across healthcare, fintech, and entertainment domains.',
-        skills: [
-          'Node.js (NestJS, Express)',
-          'Golang',
-          'MySQL',
-          'PostgreSQL',
-          'MongoDB',
-          'Elasticsearch',
-          'Redis',
-          'AWS',
-          'Azure',
-          'Kafka',
-          'CI/CD Automation',
-          'Microservices Architecture',
-          'Event-driven Systems',
-        ],
-        achievements: [
-          'Migrated monolith to microservices architecture reducing deployment time by 30% and increasing scalability by 20%',
-          'Built scalable backend systems for healthcare marketing automation',
-          'Developed full payment reconciliation system achieving 100% transaction tracking accuracy',
-          'Delivered BMS Play Credit Card integration boosting engagement by 25%',
-          'Led engineering teams and mentored developers on architecture and delivery best practices',
-        ],
-      }
-    );
+    // this.processMultipleApplications(
+    //   [
+    //     {
+    //       jobUrl: 'https://apply.workable.com/innovaccer-analytics/j/B8949A7346/',
+    //       coverLetter:
+    //         "Dear Hiring Manager,\n\nI am excited to apply for the Software Development Engineer-III (Backend) position at Innovaccer as advertised on your website. With my extensive experience in backend development, system design, and scalable architectures, I believe that I can bring a wealth of knowledge and expertise to this role.\n\nAs a Senior Software Engineer with over 8 years of experience, I have developed high-performance event-driven microservices and led cross-functional teams in my previous roles at Innovaccer, Bajaj Finserv Health, BookMyShow, and Terribly Tiny Tales. My expertise lies in building scalable backend systems for healthcare marketing campaigns, migrating monolithic applications to microservices with Kafka and Azure Service Bus, and creating end-to-end payment reconciliation systems that achieve 100% transaction tracking accuracy.\n\nI am confident that my skills align well with the key requirements of this role, including a Bachelor's degree in Computer Science or related field (or equivalent work experience), over 6 years of overall backend microservices experience, and working experience with Python, Django/FastAPI/Flask/Sanic, SQL, Cloud (Azure/AWS), Docker, MongoDB or other noSQL database. I have also demonstrated a deep knowledge of software engineering principles, design patterns, and best practices, as well as strong problem-solving skills and the ability to quickly debug and resolve complex issues.\n\nIn my previous role at Innovaccer, I was responsible for building scalable backend systems for the Cured team's healthcare marketing campaigns, implementing audience segmentation, template management, and real-e",
+    //       resumePath:
+    //         '/Users/mervej.raj/Documents/Projects/Personal/job-agent/src/data/resumes/5.pdf',
+    //       applyLink: 'https://apply.workable.com/innovaccer-analytics/j/B8949A7346/apply/',
+    //       resumeText:
+    //         '\n\nMervej Raj\n«\nGitlab|\nï\nLinkedIn|\n#\nmervejraj@gmail.com|\nH\n+91 97645 77845\nSummary\nSenior Software Engineer with 8+ years of experience in backend development,  system design,  and scalable\narchitectures.   Expert  in  building  high-performance,  event-driven  microservices  and  leading  cross-functional\nteams.  Strong advocate for automation, DevOps integration, and clean, maintainable code.\nWork Experience\nInnovaccer, Noida — Software EngineerSep 2025 – Present\n–  Builtscalable backend systemsfor  the  Cured  team  to  orchestratemulti-channel healthcare mar-\nketing campaigns,  implementingaudience segmentation,template management,  andreal-time\nanalytics APIsthat enable automated outreach viaSMS, email, and IVRacross multiple clients.\nBajaj Finserv Health, Pune — Principal Software EngineerMar 2023 – Sep 2025\n–  Migratedmonolith to microservicesandmonorepo architecturewithKafkaandAzure Service\nBus— reducing deployment time by30%, improving scalability by20%, cutting downtime by12%, and\nincreasing throughput by15%.\n–  Createdend-to-end payment reconciliation systemachieving100% transaction tracking accuracy\nand50% faster reconciliation.  Improved payment success to95%and payout success to99%.\n–  Led engineering team, mentoring onarchitecture, delivery, andcross-functional collaboration.\nBookMyShow, Mumbai — Software Development Engineer IIJul 2021 – Mar 2023\n–  DeliveredBMS Play Credit CardwithRBL Bank,RBI mandate card tokenisation,  andAPI\nintegrationswith SBI and RBL for bank offers, boosting engagement by25%.\n–  Builtbackend and CMSfor BMS offers withAPI governanceinNode.jsandGolang— improving\nefficiency  by20%,  accelerating  rollouts  by15%,  enhancing  reliability  by30%,  and  reducing  latency  by\n20%.\nTerribly Tiny Tales, Mumbai — Senior Software EngineerApr 2019 – Jul 2021\n–  Developedbackend applicationswithNode.js, MySQL, Redis,  andElasticsearch,  and  designed\nsubscription-based payment systemusingRazorpaywith recurring billing — improving performance\nby25%.\nLivelike, Gurugram — Software DeveloperJun 2017 – Mar 2019\n–  Developed  and  integratedvirtual reality apps,  enhancing  immersive  experience  offerings  for  multiple\nclients.\nPersonal Projects\nPixel Streaming Demo\nBuilt a WebRTC-based product enabling instant interactivity with 3D apps off-device using Node.js, MySQL,\nReact & AWS. Achieved near-zero download time and low latency, with autoscaling to handle real-time traffic\nsurges.\nEducation\n2013 – 2017    B.Tech, National Institute of Technology, Nagpur\n2010 – 2012    12th, Cotton College, Assam\nSkills & Highlights\nProgrammingNode.js (NestJS, Express) — 6+ yrs; Golang — 4+ yrs\nDatabasesMySQL, PostgreSQL, MongoDB, Elasticsearch, Redis, Aerospike\nFrameworks / ToolsPub-sub, Queues, Mailing, Notifications, Payment Gateways (PayU, Razorpay etc)\nAI & AutomationAI Tools (GitHub Copilot, Cursor, Windsurf), MCP Servers (Postgres, Azure ,AWS,\nGitlab, Context7 etc)\nDevOps / CloudAWS (EC2, ECS, S3), Azure (Pipelines, AKS, Blob Storage), CI/CD Design, Build\nAutomation',
+    //       structuredResume: {
+    //         profileDetails: {
+    //           name: 'Mervej Raj',
+    //           email: 'mervejraj@gmail.com',
+    //           phone: '+91 97645 77845',
+    //           location: 'India',
+    //           linkedin: 'https://www.linkedin.com/in/mervejraj/',
+    //           github: 'https://gitlab.com/users/Mervej',
+    //           website: '',
+    //         },
+    //         summary:
+    //           'Senior Software Engineer with 8+ years of experience in backend development, system design, and scalable architectures. Expert in building high-performance, event-driven microservices and leading cross-functional teams. Strong advocate for automation, DevOps integration, and clean, maintainable code.',
+    //         experience: [
+    //           {
+    //             company: 'Innovaccer',
+    //             role: 'Software Engineer',
+    //             startDate: '09/2025',
+    //             endDate: 'Present',
+    //             location: 'Noida',
+    //             description:
+    //               'Built scalable backend systems for the Cured team to orchestrate multi-channel healthcare marketing campaigns.',
+    //             achievements: [
+    //               'Implemented audience segmentation, template management, and real-time analytics APIs.',
+    //               'Enabled automated outreach via SMS, email, and IVR across multiple clients.',
+    //             ],
+    //           },
+    //           {
+    //             company: 'Bajaj Finserv Health',
+    //             role: 'Principal Software Engineer',
+    //             startDate: '03/2023',
+    //             endDate: '09/2025',
+    //             location: 'Pune',
+    //             description:
+    //               'Led migration to microservices and designed end-to-end payment reconciliation systems.',
+    //             achievements: [
+    //               'Migrated monolith to microservices and monorepo architecture with Kafka and Azure Service Bus, improving scalability and reducing downtime.',
+    //               'Created payment reconciliation system achieving 100% transaction tracking accuracy and 50% faster reconciliation.',
+    //               'Led engineering team, mentoring on architecture and delivery.',
+    //             ],
+    //           },
+    //           {
+    //             company: 'BookMyShow',
+    //             role: 'Software Development Engineer II',
+    //             startDate: '07/2021',
+    //             endDate: '03/2023',
+    //             location: 'Mumbai',
+    //             description:
+    //               'Developed banking integrations and backend systems for offers and payment-related services.',
+    //             achievements: [
+    //               'Delivered BMS Play Credit Card integration with RBL Bank and RBI mandate tokenization.',
+    //               'Built backend and CMS for BMS offers with API governance in Node.js and Golang.',
+    //             ],
+    //           },
+    //           {
+    //             company: 'Terribly Tiny Tales',
+    //             role: 'Senior Software Engineer',
+    //             startDate: '04/2019',
+    //             endDate: '07/2021',
+    //             location: 'Mumbai',
+    //             description:
+    //               'Developed backend systems and payment solutions for digital content subscriptions.',
+    //             achievements: [
+    //               'Designed subscription-based payment system using Razorpay with recurring billing.',
+    //               'Improved performance by 25% using Node.js, MySQL, Redis, and Elasticsearch.',
+    //             ],
+    //           },
+    //           {
+    //             company: 'Livelike',
+    //             role: 'Software Developer',
+    //             startDate: '06/2017',
+    //             endDate: '03/2019',
+    //             location: 'Gurugram',
+    //             description: 'Developed and integrated virtual reality apps for client projects.',
+    //             achievements: ['Enhanced immersive experience offerings for multiple clients.'],
+    //           },
+    //         ],
+    //         education: [
+    //           {
+    //             institution: 'National Institute of Technology, Nagpur',
+    //             degree: 'B.Tech',
+    //             fieldOfStudy: '',
+    //             startDate: '2013',
+    //             endDate: '2017',
+    //             description: '',
+    //           },
+    //           {
+    //             institution: 'Cotton College, Assam',
+    //             degree: '12th',
+    //             fieldOfStudy: '',
+    //             startDate: '2010',
+    //             endDate: '2012',
+    //             description: '',
+    //           },
+    //         ],
+    //         projects: [
+    //           {
+    //             name: 'Pixel Streaming Demo',
+    //             description:
+    //               'Built a WebRTC-based product enabling instant interactivity with 3D apps off-device using Node.js, MySQL, React & AWS. Achieved near-zero download time and low latency with autoscaling to handle real-time traffic surges.',
+    //             technologies: ['WebRTC', 'Node.js', 'MySQL', 'React', 'AWS'],
+    //             startDate: '',
+    //             endDate: '',
+    //           },
+    //         ],
+    //         skills: [
+    //           'Node.js',
+    //           'NestJS',
+    //           'Express',
+    //           'Golang',
+    //           'MySQL',
+    //           'PostgreSQL',
+    //           'MongoDB',
+    //           'Elasticsearch',
+    //           'Redis',
+    //           'Aerospike',
+    //           'Pub-sub',
+    //           'Queues',
+    //           'Mailing',
+    //           'Notifications',
+    //           'Payment Gateways',
+    //           'PayU',
+    //           'Razorpay',
+    //           'GitHub Copilot',
+    //           'Cursor',
+    //           'Windsurf',
+    //           'MCP Servers',
+    //           'Postgres',
+    //           'Azure',
+    //           'AWS',
+    //           'Gitlab',
+    //           'Context7',
+    //           'EC2',
+    //           'ECS',
+    //           'S3',
+    //           'Pipelines',
+    //           'AKS',
+    //           'Blob Storage',
+    //           'CI/CD',
+    //           'Build Automation',
+    //           'System Design',
+    //           'Microservices',
+    //           'Automation',
+    //           'DevOps',
+    //           'Backend Development',
+    //         ],
+    //       },
+    //     },
+    //     {
+    //       jobUrl:
+    //         'https://stripe.com/jobs/listing/software-engineer-operations-platform/7108247?gh_src=73vnei',
+    //       coverLetter:
+    //         "Dear Hiring Manager,\n\nI am writing to express my interest in the Software Engineer, Operations position at Stripe. With over eight years of experience as a Senior Software Engineer, I have honed my skills in backend development, system design, and scalable architectures. My passion for building impactful products aligns perfectly with Stripe's mission to increase the GDP of the internet.\n\nAt Innovaccer, Noida, I led cross-functional teams and built scalable backend systems that orchestrated multi-channel healthcare marketing campaigns across multiple clients. My work resulted in a 25% boost in engagement through API integrations with SBI and RBL for bank offers.\n\nDuring my tenure at Bajaj Finserv Health, Pune, I migrated monolithic systems to microservices architecture using Kafka and Azure Service Bus. This led to a 30% reduction in deployment time, improved scalability by 20%, cut downteime by 12%, and increased throughput by 15%.\n\nMy experience at BookMyShow, Mumbai, involved delivering the BMS Play Credit Card with RBL Bank, meeting RBI mandate card tokenization requirements. I also led backend and CMS development for BMS offers using Node.js and Golang, which improved efficiency by 20%, accelerated rollouts by 15%, enhanced reliability by 30%, and reduced latency by 20%.\n\nAt Terribly Tiny Tales, Mumbai, I developed backend applications with Node.js, MySQL, Redis, and Elasticsearch, designing a subscription-based payment system using Razorpay for recurring billing. My work resulted in improved performance metrics across the board.\n\nI am proficient in JavaScript (React) & Ruby, strong written and verbal communicator, and thrive on ambiguity, autonomy, and responsibility. I look forward to contributing my skills and passion towards Stripe's mission of empowering businesses to accept payments, grow their revenue, and accelerate new business opportunities.\n\nThank you for considering my application. I am excited about the opportunity to join Stripe and contribute to its success.\n\nSincerely,\nMervej Raj",
+    //       resumePath:
+    //         '/Users/mervej.raj/Documents/Projects/Personal/job-agent/src/data/resumes/5.pdf',
+    //       applyLink:
+    //         'https://stripe.com/jobs/listing/software-engineer-operations-platform/7108247/apply?gh_src=73vnei',
+    //       resumeText:
+    //         '\n\nMervej Raj\n«\nGitlab|\nï\nLinkedIn|\n#\nmervejraj@gmail.com|\nH\n+91 97645 77845\nSummary\nSenior Software Engineer with 8+ years of experience in backend development,  system design,  and scalable\narchitectures.   Expert  in  building  high-performance,  event-driven  microservices  and  leading  cross-functional\nteams.  Strong advocate for automation, DevOps integration, and clean, maintainable code.\nWork Experience\nInnovaccer, Noida — Software EngineerSep 2025 – Present\n–  Builtscalable backend systemsfor  the  Cured  team  to  orchestratemulti-channel healthcare mar-\nketing campaigns,  implementingaudience segmentation,template management,  andreal-time\nanalytics APIsthat enable automated outreach viaSMS, email, and IVRacross multiple clients.\nBajaj Finserv Health, Pune — Principal Software EngineerMar 2023 – Sep 2025\n–  Migratedmonolith to microservicesandmonorepo architecturewithKafkaandAzure Service\nBus— reducing deployment time by30%, improving scalability by20%, cutting downtime by12%, and\nincreasing throughput by15%.\n–  Createdend-to-end payment reconciliation systemachieving100% transaction tracking accuracy\nand50% faster reconciliation.  Improved payment success to95%and payout success to99%.\n–  Led engineering team, mentoring onarchitecture, delivery, andcross-functional collaboration.\nBookMyShow, Mumbai — Software Development Engineer IIJul 2021 – Mar 2023\n–  DeliveredBMS Play Credit CardwithRBL Bank,RBI mandate card tokenisation,  andAPI\nintegrationswith SBI and RBL for bank offers, boosting engagement by25%.\n–  Builtbackend and CMSfor BMS offers withAPI governanceinNode.jsandGolang— improving\nefficiency  by20%,  accelerating  rollouts  by15%,  enhancing  reliability  by30%,  and  reducing  latency  by\n20%.\nTerribly Tiny Tales, Mumbai — Senior Software EngineerApr 2019 – Jul 2021\n–  Developedbackend applicationswithNode.js, MySQL, Redis,  andElasticsearch,  and  designed\nsubscription-based payment systemusingRazorpaywith recurring billing — improving performance\nby25%.\nLivelike, Gurugram — Software DeveloperJun 2017 – Mar 2019\n–  Developed  and  integratedvirtual reality apps,  enhancing  immersive  experience  offerings  for  multiple\nclients.\nPersonal Projects\nPixel Streaming Demo\nBuilt a WebRTC-based product enabling instant interactivity with 3D apps off-device using Node.js, MySQL,\nReact & AWS. Achieved near-zero download time and low latency, with autoscaling to handle real-time traffic\nsurges.\nEducation\n2013 – 2017    B.Tech, National Institute of Technology, Nagpur\n2010 – 2012    12th, Cotton College, Assam\nSkills & Highlights\nProgrammingNode.js (NestJS, Express) — 6+ yrs; Golang — 4+ yrs\nDatabasesMySQL, PostgreSQL, MongoDB, Elasticsearch, Redis, Aerospike\nFrameworks / ToolsPub-sub, Queues, Mailing, Notifications, Payment Gateways (PayU, Razorpay etc)\nAI & AutomationAI Tools (GitHub Copilot, Cursor, Windsurf), MCP Servers (Postgres, Azure ,AWS,\nGitlab, Context7 etc)\nDevOps / CloudAWS (EC2, ECS, S3), Azure (Pipelines, AKS, Blob Storage), CI/CD Design, Build\nAutomation',
+    //       structuredResume: {
+    //         profileDetails: {
+    //           name: 'Mervej Raj',
+    //           email: 'mervejraj@gmail.com',
+    //           phone: '+91 97645 77845',
+    //           location: 'India',
+    //           linkedin: 'https://www.linkedin.com/in/mervejraj/',
+    //           github: 'https://gitlab.com/users/Mervej',
+    //           website: '',
+    //         },
+    //         summary:
+    //           'Senior Software Engineer with 8+ years of experience in backend development, system design, and scalable architectures. Expert in building high-performance, event-driven microservices and leading cross-functional teams. Strong advocate for automation, DevOps integration, and clean, maintainable code.',
+    //         experience: [
+    //           {
+    //             company: 'Innovaccer',
+    //             role: 'Software Engineer',
+    //             startDate: '09/2025',
+    //             endDate: 'Present',
+    //             location: 'Noida',
+    //             description:
+    //               'Built scalable backend systems for the Cured team to orchestrate multi-channel healthcare marketing campaigns.',
+    //             achievements: [
+    //               'Implemented audience segmentation, template management, and real-time analytics APIs.',
+    //               'Enabled automated outreach via SMS, email, and IVR across multiple clients.',
+    //             ],
+    //           },
+    //           {
+    //             company: 'Bajaj Finserv Health',
+    //             role: 'Principal Software Engineer',
+    //             startDate: '03/2023',
+    //             endDate: '09/2025',
+    //             location: 'Pune',
+    //             description:
+    //               'Led migration to microservices and designed end-to-end payment reconciliation systems.',
+    //             achievements: [
+    //               'Migrated monolith to microservices and monorepo architecture with Kafka and Azure Service Bus, improving scalability and reducing downtime.',
+    //               'Created payment reconciliation system achieving 100% transaction tracking accuracy and 50% faster reconciliation.',
+    //               'Led engineering team, mentoring on architecture and delivery.',
+    //             ],
+    //           },
+    //           {
+    //             company: 'BookMyShow',
+    //             role: 'Software Development Engineer II',
+    //             startDate: '07/2021',
+    //             endDate: '03/2023',
+    //             location: 'Mumbai',
+    //             description:
+    //               'Developed banking integrations and backend systems for offers and payment-related services.',
+    //             achievements: [
+    //               'Delivered BMS Play Credit Card integration with RBL Bank and RBI mandate tokenization.',
+    //               'Built backend and CMS for BMS offers with API governance in Node.js and Golang.',
+    //             ],
+    //           },
+    //           {
+    //             company: 'Terribly Tiny Tales',
+    //             role: 'Senior Software Engineer',
+    //             startDate: '04/2019',
+    //             endDate: '07/2021',
+    //             location: 'Mumbai',
+    //             description:
+    //               'Developed backend systems and payment solutions for digital content subscriptions.',
+    //             achievements: [
+    //               'Designed subscription-based payment system using Razorpay with recurring billing.',
+    //               'Improved performance by 25% using Node.js, MySQL, Redis, and Elasticsearch.',
+    //             ],
+    //           },
+    //           {
+    //             company: 'Livelike',
+    //             role: 'Software Developer',
+    //             startDate: '06/2017',
+    //             endDate: '03/2019',
+    //             location: 'Gurugram',
+    //             description: 'Developed and integrated virtual reality apps for client projects.',
+    //             achievements: ['Enhanced immersive experience offerings for multiple clients.'],
+    //           },
+    //         ],
+    //         education: [
+    //           {
+    //             institution: 'National Institute of Technology, Nagpur',
+    //             degree: 'B.Tech',
+    //             fieldOfStudy: '',
+    //             startDate: '2013',
+    //             endDate: '2017',
+    //             description: '',
+    //           },
+    //           {
+    //             institution: 'Cotton College, Assam',
+    //             degree: '12th',
+    //             fieldOfStudy: '',
+    //             startDate: '2010',
+    //             endDate: '2012',
+    //             description: '',
+    //           },
+    //         ],
+    //         projects: [
+    //           {
+    //             name: 'Pixel Streaming Demo',
+    //             description:
+    //               'Built a WebRTC-based product enabling instant interactivity with 3D apps off-device using Node.js, MySQL, React & AWS. Achieved near-zero download time and low latency with autoscaling to handle real-time traffic surges.',
+    //             technologies: ['WebRTC', 'Node.js', 'MySQL', 'React', 'AWS'],
+    //             startDate: '',
+    //             endDate: '',
+    //           },
+    //         ],
+    //         skills: [
+    //           'Node.js',
+    //           'NestJS',
+    //           'Express',
+    //           'Golang',
+    //           'MySQL',
+    //           'PostgreSQL',
+    //           'MongoDB',
+    //           'Elasticsearch',
+    //           'Redis',
+    //           'Aerospike',
+    //           'Pub-sub',
+    //           'Queues',
+    //           'Mailing',
+    //           'Notifications',
+    //           'Payment Gateways',
+    //           'PayU',
+    //           'Razorpay',
+    //           'GitHub Copilot',
+    //           'Cursor',
+    //           'Windsurf',
+    //           'MCP Servers',
+    //           'Postgres',
+    //           'Azure',
+    //           'AWS',
+    //           'Gitlab',
+    //           'Context7',
+    //           'EC2',
+    //           'ECS',
+    //           'S3',
+    //           'Pipelines',
+    //           'AKS',
+    //           'Blob Storage',
+    //           'CI/CD',
+    //           'Build Automation',
+    //           'System Design',
+    //           'Microservices',
+    //           'Automation',
+    //           'DevOps',
+    //           'Backend Development',
+    //         ],
+    //       },
+    //     },
+    //   ],
+    //   {
+    //     name: 'Mervej Raj',
+    //     email: 'mervejraj@gmail.com',
+    //     phone: '+91 97645 77845',
+    //     location: 'India',
+    //     linkedin: 'https://www.linkedin.com/in/mervejraj/',
+    //     github: 'https://gitlab.com/users/Mervej',
+    //     experience:
+    //       'Senior Software Engineer with 8+ years of experience in backend development, system design, and scalable architectures. Expert in building high-performance, event-driven microservices and leading cross-functional teams. Strong advocate for automation, DevOps integration, and clean, maintainable code.',
+    //     skills: [
+    //       'Node.js',
+    //       'NestJS',
+    //       'Express',
+    //       'Golang',
+    //       'MySQL',
+    //       'PostgreSQL',
+    //       'MongoDB',
+    //       'Elasticsearch',
+    //       'Redis',
+    //       'Aerospike',
+    //       'Pub-sub',
+    //       'Queues',
+    //       'Mailing',
+    //       'Notifications',
+    //       'Payment Gateways',
+    //       'PayU',
+    //       'Razorpay',
+    //       'GitHub Copilot',
+    //       'Cursor',
+    //       'Windsurf',
+    //       'MCP Servers',
+    //       'Postgres',
+    //       'Azure',
+    //       'AWS',
+    //       'Gitlab',
+    //       'Context7',
+    //       'EC2',
+    //       'ECS',
+    //       'S3',
+    //       'Pipelines',
+    //       'AKS',
+    //       'Blob Storage',
+    //       'CI/CD',
+    //       'Build Automation',
+    //       'System Design',
+    //       'Microservices',
+    //       'Automation',
+    //       'DevOps',
+    //       'Backend Development',
+    //     ],
+    //     achievements: [],
+    //     expectedCTC: '65,00,000',
+    //     currentCTC: '50,00,000',
+    //   }
+    // );
   }
 
   async close() {
-    if (this.browser) {
+    const headless = process.env.BROWSER_HEADLESS === 'true';
+    if (this.browser && headless) {
       await this.browser.close();
+      this.browser = null;
+    }
+  }
+
+  private async createPage(): Promise<Page> {
+    if (!this.browser) {
+      throw new Error('Browser not initialized. Call init() first.');
+    }
+
+    const page = await this.browser.newPage();
+    await page.setViewportSize({ width: 1280, height: 800 });
+    return page;
+  }
+
+  private async navigateToJobUrl(page: Page, jobUrl: string): Promise<void> {
+    console.log(`[DEV] Navigating to job URL: ${jobUrl}`);
+    await page.goto(jobUrl, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(2000); // Allow extra time for dynamic content
+  }
+
+  private async findApplicationLink(
+    page: Page,
+    explicitApplyLink?: string
+  ): Promise<string | null> {
+    // If an explicit apply link is provided, we try it first
+    if (explicitApplyLink) {
+      console.log(`[DEV] Using provided apply link: ${explicitApplyLink}`);
+      return explicitApplyLink;
+    }
+
+    console.log('[DEV] Searching for application link on the page...');
+
+    // Strategy 1: Look for buttons or links with typical apply text
+    const applySelectors = [
+      'a[href*="apply"]',
+      'a[href*="jobs"]',
+      'a[href*="careers"]',
+      'button:has-text("Apply")',
+      'button:has-text("Apply Now")',
+      'button:has-text("Submit Application")',
+      'a:has-text("Apply")',
+      'a:has-text("Apply Now")',
+      'a:has-text("Submit Application")',
+    ];
+
+    for (const selector of applySelectors) {
+      const element = await page.$(selector);
+      if (element) {
+        const href = await element.getAttribute('href');
+        if (href) {
+          const url = new URL(href, page.url()).toString();
+          console.log(`[DEV] Found application link via selector ${selector}: ${url}`);
+          return url;
+        }
+      }
+    }
+
+    // Strategy 1b: JS-navigation apply buttons (no href) — click the first visible button/link
+    // whose text/aria-label contains "apply" and capture the resulting URL.
+    const jsApplyBtn = await page.evaluateHandle(() => {
+      const candidates = [...document.querySelectorAll('button, a, [role="button"]')];
+      return candidates.find(el => {
+        const text = (el.textContent || '').trim().toLowerCase();
+        const aria = (el.getAttribute('aria-label') || '').toLowerCase();
+        return (
+          !el.getAttribute('href') &&  // skip anchors (handled above)
+          /\bapply\b/.test(text + ' ' + aria)
+        );
+      }) || null;
+    });
+    const jsApplyEl = jsApplyBtn.asElement();
+    if (jsApplyEl) {
+      const beforeUrl = page.url();
+      await jsApplyEl.click();
+      await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
+      const afterUrl = page.url();
+      if (afterUrl !== beforeUrl) {
+        console.log(`[DEV] JS-button click navigated to: ${afterUrl}`);
+        return afterUrl;
+      }
+    }
+
+    // Strategy 2: Check all iframes — whichever one has the most form fields is the application form.
+    // This is ATS-agnostic: no need to whitelist Workable / Greenhouse / Lever / etc. by domain.
+    const frameCandidates = page.mainFrame().childFrames();
+    let bestFrameUrl: string | null = null;
+    let bestCount = 2; // require at least 3 fields to qualify
+    for (const frame of frameCandidates) {
+      const count = await frame.evaluate(() =>
+        document.querySelectorAll(
+          'input:not([type="hidden"]):not([type="submit"]):not([type="button"]), textarea, select'
+        ).length
+      ).catch(() => 0);
+      if (count > bestCount) {
+        bestCount = count;
+        bestFrameUrl = frame.url();
+      }
+    }
+    if (bestFrameUrl) {
+      console.log(`[DEV] Found application iframe with ${bestCount} form fields: ${bestFrameUrl}`);
+      return bestFrameUrl;
+    }
+
+    console.log('[DEV] Could not automatically determine application link.');
+    return null;
+  }
+
+  /**
+   * Forcefully removes any DOM overlay/backdrop elements that block pointer events.
+   * Covers: Workable cookie-consent, Evergreen modals, generic GDPR overlays.
+   */
+  private async removeBlockingOverlays(page: Page): Promise<void> {
+    const removed = await page.evaluate(() => {
+      const selectors = [
+        // Workable cookie consent
+        '[data-ui="backdrop"]',
+        '[data-ui="cookie-consent"]',
+        '[aria-label="Cookie Consent"]',
+        // Evergreen / Segment UI modals
+        '[data-role="backdrop"]',
+        '[data-role="modal-wrapper"]',
+        '[data-evergreen-dialog-backdrop]',
+        // Generic
+        '.cookie-consent', '#cookie-consent',
+        '.gdpr-overlay', '#gdpr-overlay',
+        '.modal-backdrop', '.overlay',
+      ];
+      let count = 0;
+      for (const sel of selectors) {
+        document.querySelectorAll(sel).forEach((el) => {
+          el.remove();
+          count++;
+        });
+      }
+      // Restore scroll if body was locked
+      document.body.style.overflow = '';
+      document.documentElement.style.overflow = '';
+      return count;
+    });
+    if (removed > 0) {
+      console.log(`[DEV] Removed ${removed} blocking overlay element(s) via JS.`);
     }
   }
 
   /**
-   * Parse all form fields on the current page, including inside iframes
+   * Looks for "Import resume from" / "autofill" type buttons on the form
+   * and uses them to let the ATS parse the resume and pre-populate fields.
+   *
+   * Workable flow: click [data-ui="autofill-button"] → modal opens with a
+   * hidden file input [data-ui="autofill-computer"] → setInputFiles on it →
+   * Workable parses the PDF and auto-fills Personal Info fields.
    */
+  private async tryResumeAutofill(page: Page, resumePath: string): Promise<void> {
+    // Strategy 1: Workable-specific autofill button + hidden file input
+    const autofillBtn = await page.$('[data-ui="autofill-button"] button, [data-ui="autofill-button"]');
+    if (autofillBtn) {
+      console.log('[Autofill] Found Workable autofill button, clicking...');
+      await autofillBtn.scrollIntoViewIfNeeded();
+      await autofillBtn.click();
+      await page.waitForTimeout(1500);
+
+      // The modal contains a hidden file input for "My computer"
+      const fileInput = await page.$('input[data-ui="autofill-computer"], input#file-upload[type="file"]');
+      if (fileInput) {
+        console.log('[Autofill] Setting resume on autofill file input...');
+        await fileInput.setInputFiles(resumePath);
+        // Wait for Workable to parse the resume and populate fields
+        await page.waitForTimeout(4000);
+        console.log('[Autofill] Resume uploaded via autofill — fields should be pre-populated.');
+        return;
+      }
+      console.log('[Autofill] Autofill modal opened but file input not found.');
+      return;
+    }
+
+    // Strategy 2: Generic patterns (other ATSes)
+    const autofillPatterns = [
+      /fill.*(from|with).*(resume|cv)/i,
+      /autofill.*(resume|cv|profile)/i,
+      /import.*(resume|cv|profile)/i,
+      /parse.*(resume|cv)/i,
+    ];
+
+    const btns = await page.$$('button, a[role="button"], [role="button"]');
+    for (const btn of btns) {
+      const text = ((await btn.textContent()) || '').trim();
+      const ariaLabel = (await btn.getAttribute('aria-label')) || '';
+      const combined = `${text} ${ariaLabel}`;
+      if (autofillPatterns.some((re) => re.test(combined))) {
+        console.log(`[Autofill] Found autofill button: "${text || ariaLabel}"`);
+        await btn.scrollIntoViewIfNeeded();
+        await btn.click();
+        await page.waitForTimeout(2000);
+        return;
+      }
+    }
+    console.log('[Autofill] No autofill-from-resume button found.');
+  }
+
+  private async navigateToApplicationPage(page: Page, applyLink: string): Promise<void> {
+    console.log(`[DEV] Navigating to application link: ${applyLink}`);
+    await page.goto(applyLink, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(2000);
+  }
+
+  private async waitForForm(page: Page): Promise<void> {
+    console.log('[DEV] Waiting for form to appear...');
+    await page.waitForTimeout(2000);
+
+    // Wait for any form element or a known application container.
+    await page.waitForSelector(
+      'form, [role="form"], .application-form, .apply-form, input[type="text"], input[type="email"], textarea',
+      { timeout: 15000 }
+    );
+
+    // Dismiss cookie consent / GDPR dialogs that would block all subsequent clicks
+    await this.dismissCookieConsent(page);
+  }
+
+  private async dismissCookieConsent(page: Page): Promise<void> {
+    const consentSelectors = [
+      // Workable-specific
+      '[data-ui="cookie-consent-accept"]',
+      '[data-ui="cookie-consent-decline"]',
+      // Generic ARIA / data attributes used by many ATSes and CMPs
+      '[data-ui="cookie-consent"] button',
+      '[aria-label="Cookie Consent"] button',
+      // Common CMP button text patterns
+      'button:has-text("Accept all")',
+      'button:has-text("Accept All")',
+      'button:has-text("Accept All Cookies")',
+      'button:has-text("Allow all")',
+      'button:has-text("Allow All")',
+      'button:has-text("Agree")',
+      'button:has-text("I agree")',
+      'button:has-text("OK")',
+      'button:has-text("Got it")',
+    ];
+
+    for (const sel of consentSelectors) {
+      try {
+        const btn = page.locator(sel).first();
+        if (await btn.isVisible({ timeout: 1500 }).catch(() => false)) {
+          await btn.click();
+          console.log(`[DEV] Dismissed cookie consent via: ${sel}`);
+          await page.waitForTimeout(600);
+          break;
+        }
+      } catch {
+        // selector not found — try next
+      }
+    }
+
+    // Forcefully remove any remaining backdrop/consent overlay via JS
+    // This handles cases where the button click didn't work or the overlay reappeared
+    await this.removeBlockingOverlays(page);
+  }
+
+  private async getAllFrames(page: Page): Promise<Frame[]> {
+    const frames: Frame[] = [];
+
+    // Recursively gather all descendant frames
+    const collectChildFrames = (frame: Frame) => {
+      for (const child of frame.childFrames()) {
+        frames.push(child);
+        collectChildFrames(child);
+      }
+    };
+    collectChildFrames(page.mainFrame());
+
+    return frames;
+  }
+
+  /**
+   * Detects which frame contains the actual application form by finding the frame
+   * with the most visible form controls. Falls back to main frame.
+   * This makes the filler work whether the form is on the main page (Workable direct URL,
+   * Greenhouse direct URL) or embedded in an iframe (company careers pages that embed ATSes).
+   */
+  private async getFormFrame(page: Page): Promise<Frame> {
+    const allFrames = [page.mainFrame(), ...(await this.getAllFrames(page))];
+    let bestFrame = page.mainFrame();
+    let maxControls = 0;
+
+    for (const frame of allFrames) {
+      try {
+        const count = await frame.evaluate(() =>
+          document.querySelectorAll(
+            'input:not([type="hidden"]):not([type="submit"]):not([type="button"]),' +
+            'textarea,select'
+          ).length
+        );
+        if (count > maxControls) {
+          maxControls = count;
+          bestFrame = frame;
+        }
+      } catch { /* cross-origin or detached */ }
+    }
+
+    if (bestFrame !== page.mainFrame()) {
+      console.log(`[Orchestrator] Form detected in iframe: ${bestFrame.url()} (${maxControls} controls)`);
+    } else {
+      console.log(`[Orchestrator] Form in main frame (${maxControls} controls)`);
+    }
+    return bestFrame;
+  }
+
   private async parseFormFields(page: Page): Promise<ParsedField[]> {
+    console.log('[DEV] Parsing all form fields across page and frames...');
+
     const allFields: ParsedField[] = [];
 
-    // Recursively parse fields from all contexts (main page and all iframes)
-    await this.parseFieldsFromContext(page, allFields, 'main');
+    // Parse main page — pass mainFrame() so fields get a valid frame reference
+    await this.parseFieldsFromContext(page, allFields, 'main page', page.mainFrame());
+
+    // Parse all frames
+    const frames = await this.getAllFrames(page);
+    for (const frame of frames) {
+      try {
+        const frameName = frame.name() || frame.url() || 'unnamed frame';
+        await this.parseFieldsFromContext(frame, allFields, frameName, frame);
+      } catch (error) {
+        console.log(`[DEV] Error parsing fields in frame ${frame.name() || frame.url()}:`, error);
+      }
+    }
+
+    console.log(
+      '[DEV] Parsed fields:',
+      allFields.map((f) => ({
+        name: f.fieldName,
+        label: f.label,
+        placeholder: f.placeholder,
+        question: f.questionText,
+        autocomplete: f.autocomplete,
+        selector: f.selector,
+        type: f.inputType,
+        required: f.required,
+      }))
+    );
 
     console.log(`[DEV] Total fields found across all contexts: ${allFields.length}`);
     return allFields;
@@ -127,18 +791,32 @@ export class ApplicationFiller {
   /**
    * Recursively parse form fields from a given context (page or frame)
    */
+
   private async parseFieldsFromContext(
     context: Page | Frame,
     allFields: ParsedField[],
     contextName: string,
-    frame?: Frame,
-    visitedFrames: Set<string> = new Set()
+    frame?: Frame
   ): Promise<void> {
     try {
       console.log(`[DEV] Parsing form fields in ${contextName}...`);
 
       const contextFields = await context.evaluate(() => {
         const fields: ParsedField[] = [];
+
+        // Utility: robust visibility check to avoid capturing hidden/template fields
+        const isVisible = (el: HTMLElement): boolean => {
+          if (!el) return false;
+          if (el.hasAttribute('hidden')) return false;
+          if (el.getAttribute('aria-hidden') === 'true') return false;
+          const style = window.getComputedStyle(el);
+          if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
+            return false;
+          }
+          const rect = el.getBoundingClientRect();
+          if (rect.width === 0 || rect.height === 0) return false;
+          return true;
+        };
 
         // Supported form element selectors
         const formElements = document.querySelectorAll(
@@ -156,11 +834,15 @@ export class ApplicationFiller {
             'input[type=""]',
             // rich text
             'textarea',
-            // selects
+            // contenteditable divs (used by Workable/Lever for summary/rich-text fields)
+            'div[contenteditable="true"]',
+            // selects (including hidden ones used as underlying control in custom dropdowns)
             'select',
             // booleans
             'input[type="checkbox"]',
             'input[type="radio"]',
+            // file uploads (resume, CV, cover letter)
+            'input[type="file"]',
           ].join(', ')
         );
 
@@ -170,18 +852,25 @@ export class ApplicationFiller {
           const name = (el as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement).name;
           const type = (el as HTMLInputElement).type;
           const placeholder = (el as HTMLInputElement | HTMLTextAreaElement).placeholder;
+          const dataId = el.getAttribute('data-id') || el.getAttribute('data-field') || el.getAttribute('aria-label');
 
           let sel = tag;
-          if (type && tag === 'input') sel += `[type="${type}"]`;
-          if (name) sel += `[name="${name}"]`;
-          if (id) sel += `[id="${id}"]`;
-          if (!name && !id && placeholder) sel += `[placeholder="${placeholder}"]`;
+          if (tag === 'div' && el.getAttribute('contenteditable') === 'true') {
+            sel = 'div[contenteditable="true"]';
+          } else {
+            if (type && tag === 'input') sel += `[type="${type}"]`;
+            if (name) sel += `[name="${name}"]`;
+            if (id) sel += `[id="${id}"]`;
+            if (!name && !id && placeholder) sel += `[placeholder="${placeholder}"]`;
+            if (!name && !id && !placeholder && dataId) sel += `[aria-label="${dataId}"]`;
+          }
 
-          if (sel === tag) {
+          if (sel === tag || sel === 'div[contenteditable="true"]') {
             // fallback to nth-of-type within parent
             const parent = el.parentElement;
             if (parent) {
-              const siblings = Array.from(parent.querySelectorAll(tag));
+              const queryTag = tag === 'div' ? 'div[contenteditable="true"]' : tag;
+              const siblings = Array.from(parent.querySelectorAll(queryTag));
               const idx = siblings.indexOf(el);
               if (idx >= 0) sel += `:nth-of-type(${idx + 1})`;
             }
@@ -190,25 +879,235 @@ export class ApplicationFiller {
         };
 
         const getLabelFor = (input: Element): string => {
-          // explicit for="id"
+          const el = input as HTMLElement;
+
+          // 1. aria-label has highest priority
+          const ariaLabel = el.getAttribute('aria-label');
+          if (ariaLabel && ariaLabel.trim().length > 0) {
+            return ariaLabel.trim();
+          }
+
+          // 2. aria-labelledby -> text of referenced element(s)
+          const ariaLabelledBy = el.getAttribute('aria-labelledby');
+          if (ariaLabelledBy) {
+            const ids = ariaLabelledBy.split(/\s+/);
+            const parts: string[] = [];
+            ids.forEach((id) => {
+              const labelledEl = document.getElementById(id);
+              const text = labelledEl?.textContent?.trim();
+              if (text) parts.push(text);
+            });
+            if (parts.length > 0) {
+              return parts.join(' ');
+            }
+          }
+
+          // 3. explicit for="id"
           const id = (input as HTMLInputElement).id;
           if (id) {
             const forLabel = document.querySelector(`label[for="${id}"]`);
             if (forLabel) return forLabel.textContent?.trim() || '';
           }
-          // wrapping label
+
+          // 4. wrapping label
           const parentLabel = input.closest('label');
           if (parentLabel) return parentLabel.textContent?.trim() || '';
-          // previous sibling label in same group
+
+          // 5. previous sibling label in same group
           const group = input.closest('.form-group, .field, .form-row, .row, div');
           if (group) {
             const maybeLabel = group.querySelector('label');
             if (maybeLabel) return maybeLabel.textContent?.trim() || '';
           }
+
+          // 6. fallback to placeholder if it's descriptive
+          const placeholder =
+            (input as HTMLInputElement | HTMLTextAreaElement).placeholder ||
+            el.getAttribute('data-placeholder');
+          if (placeholder && placeholder.trim().length > 0) {
+            return placeholder.trim();
+          }
+
           return '';
         };
 
+        // Try to find a "question" or prompt text that appears near/above the input
+        const getQuestionText = (input: Element): string => {
+          const isQuestionLike = (el: Element | null, textOverride?: string): boolean => {
+            if (!el) return false;
+            const tag = el.tagName.toLowerCase();
+            // Skip the input element itself and form controls
+            if (['input', 'select', 'textarea', 'button', 'form'].includes(tag)) return false;
+            const text = (textOverride ?? (el.textContent || '')).trim();
+            if (!text) return false;
+            // Ignore very short texts (e.g., "*", ":" etc.) and very long texts (likely not a question)
+            if (text.length < 3 || text.length > 300) return false;
+            // Ignore if it's mostly numbers or special chars
+            if (/^[\d\s\-\+\*\.]+$/.test(text)) return false;
+            return true;
+          };
+
+          const extractText = (el: Element): string => {
+            // Get direct text content, ignoring nested form controls
+            let text = '';
+            for (const node of Array.from(el.childNodes)) {
+              if (node.nodeType === Node.TEXT_NODE) {
+                text += (node.textContent || '').trim() + ' ';
+              } else if (node.nodeType === Node.ELEMENT_NODE) {
+                const childEl = node as Element;
+                const tag = childEl.tagName.toLowerCase();
+                // Skip form controls
+                if (!['input', 'select', 'textarea', 'button'].includes(tag)) {
+                  const childText = extractText(childEl);
+                  if (childText) text += childText + ' ';
+                }
+              }
+            }
+            return text.trim();
+          };
+
+          // Strategy 0: if there's an associated label that looks like a question, reuse it
+          const directLabel = getLabelFor(input);
+          if (directLabel && /[:?]$/.test(directLabel.trim())) {
+            return directLabel.trim();
+          }
+
+          // Strategy 1: Check previous siblings recursively
+          const checkSiblings = (el: Element | null, depth: number): string => {
+            if (!el || depth > 3) return '';
+
+            let prev: Element | null = (el as HTMLElement).previousElementSibling;
+            let hops = 0;
+            while (prev && hops < 10) {
+              const tag = prev.tagName.toLowerCase();
+
+              // Check the sibling itself
+              if (!['input', 'select', 'textarea', 'button', 'form'].includes(tag)) {
+                const text = extractText(prev);
+                if (isQuestionLike(prev, text)) {
+                  return text;
+                }
+              }
+
+              // Check children of the sibling (common pattern: <div><p>Question?</p><input/></div>)
+              const children = prev.querySelectorAll(
+                'p, span, div, label, h1, h2, h3, h4, h5, h6, legend, strong, b, em'
+              );
+              for (const child of Array.from(children)) {
+                const childText = extractText(child);
+                if (isQuestionLike(child, childText)) {
+                  return childText;
+                }
+              }
+
+              prev = prev.previousElementSibling;
+              hops++;
+            }
+
+            // Recurse up to parent
+            if (el.parentElement) {
+              return checkSiblings(el.parentElement, depth + 1);
+            }
+
+            return '';
+          };
+
+          // Strategy 2: Check parent's text content (but exclude the input itself)
+          const checkParent = (): string => {
+            const parent = input.parentElement;
+            if (parent) {
+              const parentClone = parent.cloneNode(true) as Element;
+              // Try to remove original input from clone
+              const inputId = (input as HTMLElement).id;
+              const inputName = (input as HTMLInputElement).name;
+              const inputClone =
+                (inputId && parentClone.querySelector(`#${inputId}`)) ||
+                (inputName &&
+                  parentClone.querySelector(
+                    `input[name="${inputName}"], textarea[name="${inputName}"], select[name="${inputName}"]`
+                  ));
+              if (inputClone) {
+                inputClone.remove();
+              }
+              const text = extractText(parentClone);
+              if (isQuestionLike(parentClone, text)) {
+                return text;
+              }
+            }
+            return '';
+          };
+
+          // Strategy 3: Look in form group container
+          const checkFormGroup = (): string => {
+            const group = input.closest(
+              '.form-group, .field, .form-row, .row, .question, .form-item, [class*="field"], [class*="form"], [class*="question"], form, section, article, li, [role="group"]'
+            );
+            if (group && group !== input) {
+              // Walk through all nodes in the group
+              const walk = (node: Node): string => {
+                if (node === input) return '';
+                if (node.nodeType === Node.ELEMENT_NODE) {
+                  const el = node as Element;
+                  const tag = el.tagName.toLowerCase();
+                  if (
+                    !['input', 'select', 'textarea', 'button', 'form', 'script', 'style'].includes(
+                      tag
+                    )
+                  ) {
+                    const text = extractText(el);
+                    if (isQuestionLike(el, text)) {
+                      // Try to ensure it appears before the input in DOM order
+                      try {
+                        const range = document.createRange();
+                        range.setStart(el, 0);
+                        range.setEnd(input, 0);
+                        if (!range.collapsed) {
+                          return text;
+                        }
+                      } catch {
+                        return text;
+                      }
+                    }
+                  }
+                  // Check children
+                  for (const child of Array.from(el.childNodes)) {
+                    const result = walk(child);
+                    if (result) return result;
+                  }
+                }
+                return '';
+              };
+
+              // Start from group's children
+              for (const child of Array.from(group.childNodes)) {
+                const result = walk(child);
+                if (result) return result;
+              }
+            }
+            return '';
+          };
+
+          // Try strategies in order
+          const result1 = checkSiblings(input as HTMLElement, 0);
+          if (result1) return result1;
+
+          const result2 = checkParent();
+          if (result2) return result2;
+
+          const result3 = checkFormGroup();
+          if (result3) return result3;
+
+          return '';
+        };
+
+        const seen = new Set<Element>();
+
         formElements.forEach((element, index) => {
+          if (!(element instanceof HTMLElement)) return;
+          if (seen.has(element)) return;
+          seen.add(element);
+
+          // Skip disabled or non-visible controls (except file inputs which user might need to see)
           const tagName = element.tagName.toLowerCase();
           const inputEl = element as HTMLInputElement;
           const textAreaEl = element as HTMLTextAreaElement;
@@ -216,18 +1115,27 @@ export class ApplicationFiller {
 
           const type = tagName === 'input' ? inputEl.type || 'text' : tagName;
 
-          // Skip hidden, submit, button inputs (but keep file inputs for resume/cover letter)
           if (
-            (tagName === 'input' &&
-              (type === 'hidden' || type === 'submit' || type === 'button')) ||
-            (inputEl as any).style?.display === 'none' ||
-            element.getAttribute('aria-hidden') === 'true'
+            element.hasAttribute('disabled') ||
+            element.getAttribute('aria-disabled') === 'true'
           ) {
             return;
           }
 
-          // For file inputs, include them (they'll be handled specially for resume/cover letter)
-          // Don't skip file inputs - they need to be parsed and handled
+          // Allow hidden <select> elements through — they are often the underlying native
+          // control behind a custom dropdown (e.g. react-select, Workable notice period).
+          const isHiddenSelect = tagName === 'select' && !isVisible(element);
+          if (type !== 'file' && !isHiddenSelect && !isVisible(element)) {
+            return;
+          }
+
+          // Skip hidden, submit, button inputs (but keep file inputs for resume/cover letter)
+          if (
+            tagName === 'input' &&
+            (type === 'hidden' || type === 'submit' || type === 'button' || type === 'reset')
+          ) {
+            return;
+          }
 
           const required = !!(
             (tagName === 'input' && inputEl.required) ||
@@ -236,25 +1144,110 @@ export class ApplicationFiller {
             element.getAttribute('aria-required') === 'true'
           );
 
+          const isContentEditable = tagName === 'div' && element.getAttribute('contenteditable') === 'true';
+
           const placeholder =
-            tagName === 'select' ? '' : inputEl.placeholder || textAreaEl.placeholder || '';
+            tagName === 'select' || isContentEditable
+              ? ''
+              : inputEl.placeholder ||
+              textAreaEl.placeholder ||
+              element.getAttribute('data-placeholder') ||
+              '';
+
           const name = (inputEl.name || textAreaEl.name || selectEl.name || '').trim();
           const id = (inputEl.id || textAreaEl.id || selectEl.id || '').trim();
-          const autocomplete = (inputEl.autocomplete || textAreaEl.autocomplete || '').trim();
+          const autocomplete = (
+            inputEl.autocomplete ||
+            textAreaEl.autocomplete ||
+            selectEl.autocomplete ||
+            ''
+          ).trim();
           const label = getLabelFor(element);
+          const questionText = getQuestionText(element);
+
+          // Capture the nearest ancestor section/region heading so we can distinguish
+          // e.g. "Summary" inside "Profile" vs "Summary" inside "Details"/"Questions"
+          const getSectionHeading = (el: Element): string => {
+            let ancestor = el.parentElement;
+            while (ancestor) {
+              const role = ancestor.getAttribute('role');
+              const tag = ancestor.tagName.toLowerCase();
+              if (role === 'region' || tag === 'section' || tag === 'fieldset') {
+                // Look for the first heading inside this region
+                const heading = ancestor.querySelector('h1, h2, h3, h4, h5, h6, legend, [role="heading"]');
+                if (heading) {
+                  const text = (heading.textContent || '').trim();
+                  if (text) return text.toLowerCase();
+                }
+              }
+              ancestor = ancestor.parentElement;
+            }
+            return '';
+          };
+          const sectionHeading = getSectionHeading(element);
+
+          // For radio buttons: if questionText is empty, try to find the question
+          // in a broader ancestor search (Workable puts it 4-5 levels up)
+          let resolvedQuestionText = questionText;
+          if (!resolvedQuestionText && type === 'radio') {
+            let ancestor = element.parentElement;
+            let depth = 0;
+            while (ancestor && depth < 8) {
+              const prevSiblings = [];
+              let prev: Element | null = ancestor.previousElementSibling;
+              while (prev) {
+                prevSiblings.push(prev);
+                prev = prev.previousElementSibling;
+              }
+              for (const sib of prevSiblings) {
+                const txt = (sib.textContent || '').trim();
+                if (txt.length > 5 && txt.length < 300 && !/^[\d\s\-\+\*\.]+$/.test(txt)) {
+                  resolvedQuestionText = txt;
+                  break;
+                }
+              }
+              if (resolvedQuestionText) break;
+              ancestor = ancestor.parentElement;
+              depth++;
+            }
+          }
+
+          // Detect combobox inputs: <input role="combobox" aria-haspopup="listbox">
+          // These are custom dropdowns (e.g. Workable notice period) — filled via
+          // click-to-open + click-option, NOT plain text fill.
+          const isCombobox =
+            tagName === 'input' &&
+            element.getAttribute('role') === 'combobox' &&
+            (element.getAttribute('aria-haspopup') === 'listbox' ||
+              element.getAttribute('aria-haspopup') === 'true');
+
+          // For combobox inputs, prefer aria-labelledby over other label strategies
+          let resolvedLabel = label;
+          if (isCombobox && !resolvedLabel) {
+            const labelledBy = element.getAttribute('aria-labelledby');
+            if (labelledBy) {
+              const labelEl = document.getElementById(labelledBy);
+              resolvedLabel = labelEl?.textContent?.trim() || '';
+            }
+          }
 
           const parsed: ParsedField = {
             selector: makeUniqueSelector(element),
-            elementType: tagName as ParsedField['elementType'],
+            elementType: isContentEditable ? 'div' : tagName as ParsedField['elementType'],
             inputType: tagName === 'input' ? type : undefined,
+            isCombobox: isCombobox || undefined,
             fieldName: name || id || `field_${index}`,
             placeholder: placeholder || undefined,
-            label: label || undefined,
+            label: resolvedLabel || undefined,
+            questionText: resolvedQuestionText || undefined,
             autocomplete: autocomplete || undefined,
+            sectionHeading: sectionHeading || undefined,
             required,
             currentValue:
               tagName === 'select'
                 ? selectEl.value || undefined
+                : isContentEditable
+                ? (element as HTMLElement).innerText || undefined
                 : inputEl.value || textAreaEl.value || undefined,
           };
 
@@ -265,13 +1258,34 @@ export class ApplicationFiller {
             }));
           }
 
+          // Combobox: options are rendered dynamically (not in DOM until opened),
+          // so we can't pre-extract them. Mark as needing listbox interaction.
+          // The listbox ID is in aria-owns / aria-controls.
+          if (isCombobox) {
+            const listboxId =
+              element.getAttribute('aria-owns') ||
+              element.getAttribute('aria-controls') ||
+              '';
+            // Store listbox id in selector so filler can find options after opening
+            parsed.selector = makeUniqueSelector(element) + (listboxId ? `||listbox:${listboxId}` : '');
+          }
+
           if (type === 'radio') {
             // collect radio options by same name
             const radios = document.querySelectorAll(`input[type="radio"][name="${name}"]`);
             parsed.options = Array.from(radios).map((r) => ({
               value: (r as HTMLInputElement).value,
-              text: getLabelFor(r) || r.getAttribute('value') || '',
+              text: getLabelFor(r) || (r as HTMLInputElement).getAttribute('value') || '',
             }));
+          }
+
+          if (type === 'checkbox' && !parsed.label && placeholder) {
+            parsed.label = placeholder;
+          }
+
+          // Skip contenteditable divs that have no identifying label/question (likely decorative)
+          if (isContentEditable && !parsed.label && !parsed.questionText && !parsed.placeholder) {
+            return;
           }
 
           fields.push(parsed);
@@ -287,44 +1301,93 @@ export class ApplicationFiller {
 
       allFields.push(...contextFields);
       console.log(`[DEV] Found ${contextFields.length} fields in ${contextName}`);
-
-      // Recursively check iframes within this context
-      const iframes = await context.$$('iframe');
-      for (let i = 0; i < iframes.length; i++) {
-        try {
-          const childFrame = await iframes[i].contentFrame();
-          if (childFrame) {
-            const frameUrl = childFrame.url();
-            // Avoid infinite loops by tracking visited frames
-            if (!visitedFrames.has(frameUrl)) {
-              visitedFrames.add(frameUrl);
-              const iframeContextName = `${contextName}.iframe[${i}]`;
-              await this.parseFieldsFromContext(
-                childFrame,
-                allFields,
-                iframeContextName,
-                childFrame,
-                visitedFrames
-              );
-            }
-          }
-        } catch (error) {
-          console.log(`[DEV] Error checking iframe in ${contextName}:`, error);
-        }
-      }
     } catch (error) {
       console.log(`[DEV] Error parsing fields in ${contextName}:`, error);
     }
   }
 
-  /**
-   * Map parsed fields to user data, using AI for missing information
-   */
+  private getFieldSemanticType(field: ParsedField): string {
+    const info = `${field.label || ''} ${field.placeholder || ''} ${field.fieldName} ${field.autocomplete || ''} ${field.questionText || ''}`.toLowerCase();
+
+    if (field.inputType === 'email' || info.includes('email')) return 'email';
+    if (field.inputType === 'tel' || info.includes('phone') || info.includes('mobile'))
+      return 'phone';
+    if (info.includes('first name') || info.includes('firstname') || info.includes('given name'))
+      return 'firstName';
+    if (info.includes('last name') || info.includes('lastname') || info.includes('surname'))
+      return 'lastName';
+    if (
+      info.includes('full name') ||
+      info.includes('your name') ||
+      (info.includes('name') &&
+        !info.includes('company') &&
+        !info.includes('school') &&
+        !info.includes('institution') &&
+        !info.includes('file') &&
+        !info.includes('last') &&
+        !info.includes('first'))
+    )
+      return 'fullName';
+    if (info.includes('linkedin')) return 'linkedin';
+    if (info.includes('github')) return 'github';
+    if (info.includes('portfolio') || info.includes('website')) return 'portfolio';
+    if (info.includes('location') || info.includes('city') || info.includes('country'))
+      return 'location';
+    if (info.includes('resume') || info.includes('cv')) return 'resume';
+    if (info.includes('cover letter') || info.includes('motivation letter')) return 'coverLetter';
+    // Only treat as profile summary if it's inside a "Profile" section
+    // (not a job-specific details/questions section)
+    const sectionHeading = (field.sectionHeading || '').toLowerCase();
+    const isProfileSection =
+      sectionHeading.includes('profile') ||
+      sectionHeading.includes('about') ||
+      sectionHeading === '';  // no section = top-level, treat as profile
+    const isJobSpecificSection =
+      sectionHeading.includes('detail') ||
+      sectionHeading.includes('question') ||
+      sectionHeading.includes('additional') ||
+      sectionHeading.includes('screening') ||
+      sectionHeading.includes('experience') ||
+      sectionHeading.includes('work') ||
+      sectionHeading.includes('job') ||
+      sectionHeading.includes('employment') ||
+      sectionHeading.includes('education');
+    if (
+      !isJobSpecificSection &&
+      isProfileSection &&
+      (info.includes('summary') ||
+        info.includes('about you') ||
+        info.includes('about yourself') ||
+        info.includes('professional profile') ||
+        info.includes('bio'))
+    )
+      return 'summary';
+    if (info.includes('experience') || info.includes('years') || info.includes('background'))
+      return 'experience';
+    if (info.includes('skills') || info.includes('technologies') || info.includes('stack'))
+      return 'skills';
+    if (info.includes('current ctc') || info.includes('current salary') || info.includes('current compensation') || info.includes('current annual'))
+      return 'currentCTC';
+    if (info.includes('expected ctc') || info.includes('expected salary') || info.includes('expected compensation') || info.includes('expected annual') || info.includes('salary expectation'))
+      return 'expectedCTC';
+    if (info.includes('notice period') || info.includes('notice'))
+      return 'noticePeriod';
+    if (info.includes('work authorization') || info.includes('work permit') || info.includes('visa') || info.includes('authorized to work') || info.includes('legally'))
+      return 'workAuthorization';
+    if (info.includes('relocat'))
+      return 'relocation';
+    if (info.includes('gender') || info.includes('pronouns') || info.includes('ethnicity') || info.includes('race') || info.includes('disability') || info.includes('veteran'))
+      return 'diversity';
+
+    return 'other';
+  }
+
   private async mapFieldsToData(
     fields: ParsedField[],
     userProfile: UserProfile,
     coverLetter: string,
-    resumeText: string
+    resumeText: string,
+    structuredResume?: StructuredResume | null
   ): Promise<FieldMapping[]> {
     const mappings: FieldMapping[] = [];
 
@@ -333,2074 +1396,246 @@ export class ApplicationFiller {
       let needsAI = false;
       let aiPrompt: string | undefined;
 
-      const info = `${field.label || ''} ${field.placeholder || ''} ${field.fieldName} ${
-        field.autocomplete || ''
-      } ${field.inputType || ''}`
-        .toLowerCase()
-        .trim();
+      const info = `${field.label || ''} ${field.placeholder || ''} ${field.fieldName} ${field.autocomplete || ''} ${field.questionText || ''}`.toLowerCase();
 
-      // Strong signals via autocomplete
-      switch (field.autocomplete) {
-        case 'given-name':
-          mappedData = userProfile.name.split(' ')[0];
-          break;
-        case 'family-name':
-          mappedData = userProfile.name.split(' ').slice(1).join(' ');
-          break;
+      const resumeContext = resumeText || '';
+      const semanticType = this.getFieldSemanticType(field);
+
+      // Short-circuit based on semantic type
+      switch (semanticType) {
         case 'email':
           mappedData = userProfile.email;
           break;
-        case 'tel':
+        case 'phone':
           mappedData = userProfile.phone || '';
           break;
-        case 'url':
-          mappedData = userProfile.github || userProfile.linkedin || '';
-          break;
-      }
-
-      if (!mappedData) {
-        // Direct mappings from user profile
-        if (info.includes('first') && info.includes('name')) {
+        case 'firstName':
           mappedData = userProfile.name.split(' ')[0];
-        } else if (info.includes('last') && info.includes('name')) {
+          break;
+        case 'lastName':
           mappedData = userProfile.name.split(' ').slice(1).join(' ');
-        } else if (info.includes('email') || field.inputType === 'email') {
-          mappedData = userProfile.email;
-        } else if (info.includes('phone') || field.inputType === 'tel') {
-          mappedData = userProfile.phone || '';
-        } else if (info.includes('linkedin')) {
+          break;
+        case 'fullName':
+          mappedData = userProfile.name;
+          break;
+        case 'linkedin':
           mappedData = userProfile.linkedin || '';
-        } else if (info.includes('github')) {
+          break;
+        case 'github':
           mappedData = userProfile.github || '';
-        } else if (
-          info.includes('website') ||
-          info.includes('portfolio') ||
-          field.inputType === 'url'
-        ) {
+          break;
+        case 'portfolio':
           mappedData = userProfile.github || userProfile.linkedin || '';
-        } else if (info.includes('cover') && info.includes('letter')) {
+          break;
+        case 'location':
+          mappedData = userProfile.location || '';
+          break;
+        case 'coverLetter':
           mappedData = coverLetter;
-        } else if (info.includes('authorized') || info.includes('legally')) {
-          // Default to Yes if authorization question
-          mappedData = 'yes';
-        } else if (info.includes('hear') && info.includes('about')) {
-          // How did you hear -> choose LinkedIn if present
-          mappedData = userProfile.linkedin ? 'LinkedIn' : '';
-        }
-      }
-
-      // AI targets
-      if (!mappedData) {
-        if (info.includes('experience') || info.includes('years')) {
-          needsAI = true;
-          aiPrompt = `Extract total years of professional experience as a number (e.g., 5) from this resume: "${resumeText.slice(
-            0,
-            2000
-          )}..."`;
-        } else if (info.includes('salary') || info.includes('compensation')) {
-          needsAI = true;
-          aiPrompt = `Extract expected salary or suggest a reasonable range based on experience. Respond briefly. Resume: "${resumeText.slice(
-            0,
-            2000
-          )}..."`;
-        } else if (info.includes('location') || info.includes('city')) {
-          needsAI = true;
-          aiPrompt = `Extract current location/city from resume. Respond as "City, Country" if possible. Resume: "${resumeText.slice(
-            0,
-            2000
-          )}..."`;
-        } else if (
-          info.includes('why') ||
-          info.includes('motivation') ||
-          info.includes('interest')
-        ) {
-          needsAI = true;
-          aiPrompt = `In 2-3 sentences, explain why this candidate is a great fit for this role, based on resume: "${resumeText.slice(
-            0,
-            2000
-          )}..."`;
-        } else if (info.includes('skills') || info.includes('technologies')) {
-          needsAI = true;
-          aiPrompt = `List 8-12 key technical skills from the resume, comma-separated: "${resumeText.slice(
-            0,
-            2000
-          )}..."`;
-        } else if (
-          info.includes('availability') ||
-          info.includes('start') ||
-          info.includes('notice')
-        ) {
-          needsAI = true;
-          aiPrompt = `Suggest a realistic start date (e.g., "Within 2 weeks") based on resume context: "${resumeText.slice(
-            0,
-            2000
-          )}..."`;
-        } else {
-          needsAI = true;
-          aiPrompt = `Given this field description "${info}", provide a concise, professional value based on the resume: "${resumeText.slice(
-            0,
-            2000
-          )}..."`;
-        }
-      }
-
-      mappings.push({ field, mappedData, needsAI, aiPrompt });
-    }
-
-    // Process AI mappings with timeout to prevent hanging
-    for (const mapping of mappings) {
-      if (mapping.needsAI && !mapping.mappedData && mapping.aiPrompt) {
-        try {
-          console.log(
-            `[DEV] Using AI for field: ${mapping.field.fieldName} - ${
-              mapping.field.label || mapping.field.placeholder
-            }`
-          );
-
-          // Add timeout to prevent hanging
-          const aiPromise = generateText(
-            'You are an assistant helping fill out job application forms.',
-            mapping.aiPrompt
-          );
-
-          const timeoutPromise = new Promise<string>((_, reject) => {
-            setTimeout(() => reject(new Error('AI call timeout')), 10000); // 10 second timeout
-          });
-
-          let aiResponse: string;
-          try {
-            aiResponse = await Promise.race([aiPromise, timeoutPromise]);
-          } catch (timeoutError) {
-            console.log(
-              `[DEV] AI call timed out for field ${mapping.field.fieldName}, using fallback`
-            );
-            aiResponse = '';
+          break;
+        case 'currentCTC':
+          mappedData = userProfile.currentCTC || '';
+          break;
+        case 'expectedCTC':
+          mappedData = userProfile.expectedCTC || '';
+          break;
+        case 'noticePeriod':
+          mappedData = userProfile.noticePeriod || '';
+          break;
+        case 'workAuthorization':
+          // Default to yes — candidate is applying, implying they are authorized
+          mappedData = userProfile.workAuthorization || 'Yes';
+          break;
+        case 'relocation':
+          // Default to yes — always willing to relocate unless profile says otherwise
+          mappedData = userProfile.willingToRelocate || 'Yes';
+          break;
+        case 'diversity':
+          // Leave blank — candidate should fill these voluntarily
+          mappedData = '';
+          break;
+        case 'summary': {
+          // Build a clean technical context from structured resume — exclude profile details (phone, location, etc.)
+          let technicalContext = '';
+          if (structuredResume) {
+            if (structuredResume.experience?.length) {
+              technicalContext += 'Experience:\n' + structuredResume.experience.map(e =>
+                `${e.role} at ${e.company} (${e.startDate} – ${e.endDate || 'Present'})${e.description ? ': ' + e.description : ''}${e.achievements?.length ? '\n- ' + e.achievements.join('\n- ') : ''}`
+              ).join('\n\n') + '\n\n';
+            }
+            if (structuredResume.skills?.length) {
+              technicalContext += 'Skills: ' + structuredResume.skills.join(', ') + '\n\n';
+            }
+            if (structuredResume.projects?.length) {
+              technicalContext += 'Projects:\n' + structuredResume.projects.map(p =>
+                `${p.name}${p.description ? ': ' + p.description : ''}${p.technologies?.length ? ' [' + p.technologies.join(', ') + ']' : ''}`
+              ).join('\n') + '\n\n';
+            }
           }
-
-          // Transform AI response to match field type
-          mapping.mappedData = this.transformValueForFieldType(aiResponse, mapping.field);
-          console.log(
-            `[DEV] AI generated: "${aiResponse}" -> transformed to: "${mapping.mappedData}"`
-          );
-        } catch (error) {
-          console.log(
-            `[DEV] AI generation failed for field ${mapping.field.fieldName}:`,
-            error as any
-          );
-          mapping.mappedData = '';
+          const summaryContext = technicalContext.trim() || resumeContext;
+          needsAI = true;
+          aiPrompt = `Write a concise 2–3 sentence professional summary in first person, focused entirely on technical expertise, years of experience, and key skills. Do NOT include contact details, location, phone, or links. Base it only on the technical information below.\n\n${summaryContext}`;
+          break;
         }
-      } else if (mapping.mappedData) {
-        // Transform even non-AI data to ensure it matches field type
-        mapping.mappedData = this.transformValueForFieldType(mapping.mappedData, mapping.field);
       }
+
+      // If already mapped via semantic type, we can skip further logic
+      if (!mappedData) {
+        // Resume / CV upload fields will be handled separately by uploadResume
+        if (
+          info.includes('resume') ||
+          info.includes('cv') ||
+          (field.inputType === 'file' &&
+            (field.fieldName.toLowerCase().includes('resume') ||
+              field.fieldName.toLowerCase().includes('cv')))
+        ) {
+          mappedData = undefined;
+          needsAI = false;
+        } else if (info.includes('why this role') || info.includes('why do you want')) {
+          // Motivation / cover letter style questions
+          needsAI = true;
+          aiPrompt = `You are helping a candidate answer an application question based on their resume.
+
+Question:
+${field.questionText || field.label || 'Explain why you are a good fit for this role.'}
+
+Candidate resume:
+${resumeContext}
+
+Write a concise, 2–4 sentence answer in first person, specific and grounded in the resume.`;
+        } else if (info.includes('years of experience') || info.includes('experience (years)')) {
+          // Try to compute years of experience from structured resume if available
+          if (
+            structuredResume &&
+            structuredResume.experience &&
+            structuredResume.experience.length > 0
+          ) {
+            const now = new Date();
+            const earliest = structuredResume.experience[structuredResume.experience.length - 1];
+            const extractYear = (dateStr: string | undefined | null): number | null => {
+              if (!dateStr) return null;
+              const match = dateStr.match(/\b(19|20)\d{2}\b/);
+              return match ? parseInt(match[0], 10) : null;
+            };
+            const startYear = extractYear(earliest.startDate);
+            if (startYear) {
+              const years = now.getFullYear() - startYear;
+              mappedData = String(years);
+            } else {
+              needsAI = true;
+              aiPrompt = `Estimate total years of professional experience from this resume. Return only a number:
+
+${resumeContext}`;
+            }
+          } else {
+            needsAI = true;
+            aiPrompt = `Estimate total years of professional experience from this resume. Return only a number:
+
+${resumeContext}`;
+          }
+        } else if (semanticType === 'skills' || info.includes('skills')) {
+          if (structuredResume?.skills && structuredResume.skills.length > 0) {
+            mappedData = structuredResume.skills.join(', ');
+          } else if (userProfile.skills && userProfile.skills.length > 0) {
+            mappedData = userProfile.skills.join(', ');
+          } else {
+            needsAI = true;
+            aiPrompt = `Extract the candidate's key technical and professional skills as a comma-separated list from this resume:
+
+${resumeContext}`;
+          }
+        } else if (semanticType === 'experience') {
+          if (structuredResume?.experience && structuredResume.experience.length > 0) {
+            const expText = structuredResume.experience
+              .map(
+                (exp) =>
+                  `${exp.role} at ${exp.company} (${exp.startDate} - ${exp.endDate || 'Present'})`
+              )
+              .join('; ');
+            mappedData = expText;
+          } else {
+            needsAI = true;
+            aiPrompt = `Summarize the candidate's most relevant work experience for this field in 3–4 lines, using first person:
+
+${resumeContext}`;
+          }
+        } else if (info.includes('current company') || info.includes('employer')) {
+          mappedData =
+            userProfile.currentCompany || structuredResume?.experience?.[0]?.company || '';
+        } else if (
+          info.includes('current title') ||
+          info.includes('role') ||
+          info.includes('position')
+        ) {
+          mappedData = userProfile.currentRole || structuredResume?.experience?.[0]?.role || '';
+        } else if (info.includes('city') || info.includes('location')) {
+          mappedData = userProfile.location || '';
+        } else if (info.includes('website')) {
+          mappedData = userProfile.github || userProfile.linkedin || '';
+        }
+      }
+
+      const questionForFallback = field.questionText || field.label || '';
+
+      // ── Universal options handling ──────────────────────────────────────────
+      // Applies to select, radio, and any field that exposes a fixed list of choices.
+      // Goal: mappedData must always end up as an *exact* option text (or AI picks one).
+      const validOptions = (field.options || []).filter(
+        (o) => o.text && o.text.trim() && !/^(-+|select\.?\.?\.?|choose\.?\.?\.?|please select)$/i.test(o.text.trim())
+      );
+
+      if (validOptions.length > 0) {
+        if (mappedData) {
+          // We have a candidate value — try to match it to an available option
+          const v = mappedData.toLowerCase();
+          const match = validOptions.find(
+            (o) =>
+              o.text.toLowerCase() === v ||
+              o.text.toLowerCase().includes(v) ||
+              v.includes(o.text.toLowerCase())
+          );
+          if (match) {
+            mappedData = match.text; // normalise to exact option text
+          } else {
+            // Our value doesn't match any option — let AI pick the closest one
+            needsAI = true;
+            aiPrompt = buildOptionsPrompt(questionForFallback || field.fieldName, validOptions, resumeContext, mappedData);
+            mappedData = undefined;
+          }
+        } else if (!needsAI) {
+          // No value yet and no AI prompt — ask AI to pick from the list
+          needsAI = true;
+          aiPrompt = buildOptionsPrompt(questionForFallback || field.fieldName, validOptions, resumeContext);
+        } else if (needsAI && aiPrompt) {
+          // AI is already being invoked — append options constraint to the existing prompt
+          const optionList = validOptions.map((o) => o.text).join(', ');
+          aiPrompt += `\n\nAvailable options (respond with ONLY one of these, exactly as written): ${optionList}`;
+        }
+      } else if (!mappedData && !needsAI) {
+        // No options, no value yet — generic text fallback
+        if (questionForFallback.includes('?')) {
+          needsAI = true;
+          aiPrompt = `You are the candidate filling out a job application.
+
+Question:
+${questionForFallback}
+
+Write a concise answer in first person, grounded ONLY in the resume below.
+
+Resume:
+${resumeContext}`;
+        }
+      }
+
+      mappings.push({
+        field,
+        mappedData,
+        needsAI,
+        aiPrompt,
+      });
     }
 
     return mappings;
-  }
-
-  private normalizeYesNo(value: string | undefined): 'yes' | 'no' | undefined {
-    if (!value) return undefined;
-    const v = value.toLowerCase();
-    if (['yes', 'y', 'true', '1'].some((k) => v.includes(k))) return 'yes';
-    if (['no', 'n', 'false', '0'].some((k) => v.includes(k))) return 'no';
-    return undefined;
-  }
-
-  /**
-   * Transform AI response to match expected field type
-   */
-  private transformValueForFieldType(
-    value: string | undefined,
-    field: ParsedField
-  ): string | undefined {
-    if (!value) return value;
-
-    const inputType = field.inputType?.toLowerCase();
-    const fieldName = field.fieldName.toLowerCase();
-    const label = (field.label || '').toLowerCase();
-    const placeholder = (field.placeholder || '').toLowerCase();
-    const combined = `${fieldName} ${label} ${placeholder}`;
-
-    // Date fields - ensure YYYY-MM-DD format
-    if (inputType === 'date' || inputType === 'datetime-local' || combined.includes('date')) {
-      try {
-        // Clean up AI responses that include format hints like "mm/yyyy: 31/07/2023"
-        let cleanValue = value
-          .replace(/^(?:mm\/yyyy|yyyy\/mm|dd\/mm\/yyyy|mm\/dd\/yyyy|yyyy-mm-dd)[:\s]*/i, '')
-          .trim();
-
-        // First try to extract existing YYYY-MM-DD format
-        const dateMatch = cleanValue.match(/(\d{4}-\d{2}-\d{2})/);
-        if (dateMatch) {
-          return dateMatch[1];
-        }
-
-        // Handle various date formats: DD/MM/YYYY, MM/DD/YYYY, DD-MM-YYYY, etc.
-        const formats = [
-          /(\d{1,2})\/(\d{1,2})\/(\d{4})/, // DD/MM/YYYY or MM/DD/YYYY
-          /(\d{1,2})-(\d{1,2})-(\d{4})/, // DD-MM-YYYY or MM-DD-YYYY
-          /(\d{4})\/(\d{1,2})\/(\d{1,2})/, // YYYY/MM/DD
-          /(\d{4})-(\d{1,2})-(\d{1,2})/, // YYYY-MM-DD
-        ];
-
-        for (const format of formats) {
-          const match = cleanValue.match(format);
-          if (match) {
-            let year, month, day;
-
-            if (match[1].length === 4) {
-              // YYYY/MM/DD or YYYY-MM-DD format
-              [year, month, day] = [match[1], match[2], match[3]];
-            } else {
-              // Try to determine if it's MM/DD/YYYY or DD/MM/YYYY
-              // For end_date, it's likely DD/MM/YYYY
-              if (combined.includes('end') || combined.includes('to')) {
-                // Assume DD/MM/YYYY for end dates
-                [day, month, year] = [match[1], match[2], match[3]];
-              } else {
-                // For start dates, assume MM/DD/YYYY
-                [month, day, year] = [match[1], match[2], match[3]];
-              }
-            }
-
-            // Validate and format
-            const monthNum = parseInt(month, 10);
-            const dayNum = parseInt(day, 10);
-            const yearNum = parseInt(year, 10);
-
-            if (
-              monthNum >= 1 &&
-              monthNum <= 12 &&
-              dayNum >= 1 &&
-              dayNum <= 31 &&
-              yearNum > 1900 &&
-              yearNum < 2100
-            ) {
-              return `${yearNum.toString().padStart(4, '0')}-${monthNum.toString().padStart(2, '0')}-${dayNum.toString().padStart(2, '0')}`;
-            }
-          }
-        }
-
-        // Try parsing relative dates
-        const lowerValue = cleanValue.toLowerCase();
-        if (
-          lowerValue.includes('week') ||
-          lowerValue.includes('month') ||
-          lowerValue.includes('present') ||
-          lowerValue.includes('current')
-        ) {
-          if (
-            lowerValue.includes('present') ||
-            lowerValue.includes('current') ||
-            lowerValue.includes('now')
-          ) {
-            return new Date().toISOString().split('T')[0];
-          }
-
-          const weeksMatch = cleanValue.match(/(\d+)\s*weeks?/i);
-          const monthsMatch = cleanValue.match(/(\d+)\s*months?/i);
-          if (weeksMatch) {
-            const weeks = parseInt(weeksMatch[1], 10);
-            const date = new Date();
-            date.setDate(date.getDate() + weeks * 7);
-            return date.toISOString().split('T')[0];
-          }
-          if (monthsMatch) {
-            const months = parseInt(monthsMatch[1], 10);
-            const date = new Date();
-            date.setMonth(date.getMonth() + months);
-            return date.toISOString().split('T')[0];
-          }
-        }
-
-        // Try parsing as general date string
-        const parsed = new Date(cleanValue);
-        if (!isNaN(parsed.getTime())) {
-          return parsed.toISOString().split('T')[0];
-        }
-
-        console.log(
-          `[DEV] Could not parse date: "${cleanValue}" (original: "${value}"), using current date`
-        );
-      } catch (e) {
-        console.log(`[DEV] Error parsing date "${value}": ${e}`);
-      }
-
-      // Fallback to current date if parsing fails
-      return new Date().toISOString().split('T')[0];
-    }
-
-    // Number fields
-    if (inputType === 'number' || combined.includes('year') || combined.includes('experience')) {
-      const numMatch = value.match(/(\d+(?:\.\d+)?)/);
-      if (numMatch) {
-        return numMatch[1];
-      }
-    }
-
-    // Email fields
-    if (inputType === 'email' || combined.includes('email')) {
-      const emailMatch = value.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
-      if (emailMatch) {
-        return emailMatch[1];
-      }
-    }
-
-    // URL fields
-    if (
-      inputType === 'url' ||
-      combined.includes('url') ||
-      combined.includes('website') ||
-      combined.includes('linkedin') ||
-      combined.includes('github')
-    ) {
-      if (!value.startsWith('http://') && !value.startsWith('https://')) {
-        if (value.includes('linkedin.com') || value.includes('github.com')) {
-          return `https://${value}`;
-        }
-      }
-      return value;
-    }
-
-    // Tel/Phone fields
-    if (inputType === 'tel' || combined.includes('phone') || combined.includes('mobile')) {
-      // Remove non-digit characters except +, spaces, and hyphens
-      return value.replace(/[^\d+\s-]/g, '');
-    }
-
-    return value.trim();
-  }
-
-  /**
-   * Handle date input fields - fill date and handle date picker modals
-   */
-  private async fillDateField(
-    context: Page | Frame,
-    field: ParsedField,
-    mappedData: string | undefined
-  ): Promise<boolean> {
-    try {
-      const el = await context.$(field.selector);
-      if (!el || !mappedData) return false;
-
-      // Transform the date value to ensure proper format
-      let dateValue = this.transformValueForFieldType(mappedData, field);
-      if (!dateValue || !dateValue.match(/^\d{4}-\d{2}-\d{2}/)) {
-        // Fallback: use current date
-        dateValue = new Date().toISOString().split('T')[0];
-      }
-
-      // Try direct fill first (without clicking to avoid opening picker)
-      try {
-        // Clear field first
-        await el.click({ clickCount: 3 }); // Triple click to select all
-        await context.waitForTimeout(100);
-        await el.fill(dateValue);
-        await context.waitForTimeout(200);
-
-        // Verify the value was set
-        const currentValue = await el.inputValue();
-        if (currentValue === dateValue) {
-          console.log(`[DEV] Filled date field "${field.fieldName}": "${dateValue}"`);
-          return true;
-        }
-      } catch (error) {
-        console.log(`[DEV] Direct fill failed, trying alternative method...`);
-      }
-
-      // Alternative: Use JavaScript to set value directly
-      try {
-        await el.evaluate((element: HTMLInputElement, value: string) => {
-          element.value = value;
-          element.dispatchEvent(new Event('input', { bubbles: true }));
-          element.dispatchEvent(new Event('change', { bubbles: true }));
-        }, dateValue);
-        await context.waitForTimeout(200);
-        console.log(`[DEV] Filled date field "${field.fieldName}" via JavaScript: "${dateValue}"`);
-        return true;
-      } catch (error) {
-        console.log(`[DEV] JavaScript fill failed, checking for date picker...`);
-      }
-
-      // If above methods fail, handle date picker modal
-      try {
-        await el.click();
-        await context.waitForTimeout(300);
-
-        // Check if date picker modal opened
-        const datePickerSelectors = [
-          '[role="dialog"]',
-          '.datepicker',
-          '.calendar',
-          '[class*="date-picker"]',
-          '[class*="datepicker"]',
-          '[class*="calendar"]',
-          '[id*="datepicker"]',
-          '[id*="calendar"]',
-          '[class*="ui-datepicker"]',
-          '[class*="flatpickr"]',
-        ];
-
-        let pickerFound = false;
-        for (const pickerSelector of datePickerSelectors) {
-          try {
-            const picker = await context.$(pickerSelector);
-            if (picker && (await picker.isVisible().catch(() => false))) {
-              pickerFound = true;
-              console.log(`[DEV] Date picker modal detected, closing it...`);
-
-              // Try multiple methods to close picker
-              try {
-                await el.press('Escape');
-                await context.waitForTimeout(200);
-              } catch (e) {
-                // Try clicking outside
-                try {
-                  await context.click('body', { position: { x: 10, y: 10 } });
-                  await context.waitForTimeout(200);
-                } catch (e2) {
-                  // Try pressing Enter (might select today's date)
-                  await el.press('Enter');
-                  await context.waitForTimeout(200);
-                }
-              }
-              break;
-            }
-          } catch (e) {
-            // Continue
-          }
-        }
-
-        // After closing picker (or if no picker), try filling again
-        await el.evaluate((element: HTMLInputElement, value: string) => {
-          element.value = value;
-          element.dispatchEvent(new Event('input', { bubbles: true }));
-          element.dispatchEvent(new Event('change', { bubbles: true }));
-        }, dateValue);
-        await context.waitForTimeout(200);
-        console.log(
-          `[DEV] Filled date field "${field.fieldName}" after handling picker: "${dateValue}"`
-        );
-        return true;
-      } catch (error) {
-        console.log(`[DEV] Error handling date picker: ${error}`);
-      }
-    } catch (error) {
-      console.log(`[DEV] Error filling date field "${field.fieldName}": ${error}`);
-    }
-    return false;
-  }
-
-  private async selectBestOption(
-    page: Page,
-    selector: string,
-    options: ParsedFieldOption[] | undefined,
-    desired: string | undefined,
-    frame?: Frame,
-    fieldLabel?: string
-  ): Promise<boolean> {
-    try {
-      // Get the appropriate context (main page or iframe)
-      const context: Frame | Page = frame || page;
-
-      const el = await context.$(selector);
-      if (!el || !options || options.length === 0) return false;
-      const target = (desired || '').toLowerCase().trim();
-
-      // If no desired value but we have options, use AI to select best option
-      if (!target && options.length > 0) {
-        try {
-          const optionsText = options
-            .map((o, i) => `${i + 1}. ${o.text} (value: ${o.value})`)
-            .join('\n');
-          const aiPrompt = `Given this dropdown field "${fieldLabel || 'field'}" with the following options:\n${optionsText}\n\nBased on the resume context, select the BEST option number (1-${options.length}) that most accurately represents the candidate's situation. Respond with ONLY the number.`;
-
-          // Add timeout to prevent hanging
-          const aiPromise = generateText(
-            'You are an assistant helping fill out job application forms. Select the best option from dropdowns.',
-            aiPrompt
-          );
-
-          const timeoutPromise = new Promise<string>((_, reject) => {
-            setTimeout(() => reject(new Error('AI timeout')), 8000); // 8 second timeout
-          });
-
-          const aiResponse = await Promise.race([aiPromise, timeoutPromise]);
-          const selectedIndex = parseInt(aiResponse.trim().match(/\d+/)?.[0] || '1', 10) - 1;
-
-          if (selectedIndex >= 0 && selectedIndex < options.length) {
-            await el.selectOption({ value: options[selectedIndex].value });
-            console.log(
-              `[DEV] AI selected option "${options[selectedIndex].text}" (index ${selectedIndex + 1}) for "${fieldLabel || selector}"`
-            );
-            return true;
-          }
-        } catch (aiError) {
-          console.log(`[DEV] AI selection failed, falling back to heuristics: ${aiError}`);
-        }
-      }
-
-      // Try exact match by text or value
-      let match = options.find(
-        (o) => o.text.toLowerCase() === target || o.value.toLowerCase() === target
-      );
-
-      // Try includes match
-      if (!match && target) {
-        match = options.find(
-          (o) => o.text.toLowerCase().includes(target) || o.value.toLowerCase().includes(target)
-        );
-      }
-
-      // Special handling: years of experience numeric -> bucket
-      if (!match && target) {
-        const yearsMatch = target.match(/(\d+)(?:\+)?\s*years?/);
-        if (yearsMatch) {
-          const years = parseInt(yearsMatch[1], 10);
-          const preferTexts = options.map((o) => o.text.toLowerCase());
-          const bucket =
-            years < 1
-              ? '0-1'
-              : years < 3
-                ? '1-3'
-                : years < 5
-                  ? '3-5'
-                  : years < 7
-                    ? '5-7'
-                    : years < 10
-                      ? '7-10'
-                      : '10+';
-          match = options.find((o) => o.text.toLowerCase().includes(bucket));
-        }
-      }
-
-      // Fallback: yes/no selects
-      if (!match) {
-        const yn = this.normalizeYesNo(desired);
-        if (yn) {
-          match = options.find(
-            (o) => o.text.toLowerCase().includes(yn) || o.value.toLowerCase().includes(yn)
-          );
-        }
-      }
-
-      // If still no match and we have a desired value, use AI to match
-      if (!match && target && options.length > 0) {
-        try {
-          const optionsText = options
-            .map((o, i) => `${i + 1}. ${o.text} (value: ${o.value})`)
-            .join('\n');
-          const aiPrompt = `Given this dropdown field "${fieldLabel || 'field'}" with desired value "${desired}" and the following options:\n${optionsText}\n\nSelect the BEST option number (1-${options.length}) that matches or is closest to "${desired}". Respond with ONLY the number.`;
-
-          // Add timeout to prevent hanging
-          const aiPromise = generateText(
-            'You are an assistant helping fill out job application forms. Match dropdown options to desired values.',
-            aiPrompt
-          );
-
-          const timeoutPromise = new Promise<string>((_, reject) => {
-            setTimeout(() => reject(new Error('AI timeout')), 8000); // 8 second timeout
-          });
-
-          const aiResponse = await Promise.race([aiPromise, timeoutPromise]);
-          const selectedIndex = parseInt(aiResponse.trim().match(/\d+/)?.[0] || '1', 10) - 1;
-
-          if (selectedIndex >= 0 && selectedIndex < options.length) {
-            match = options[selectedIndex];
-          }
-        } catch (aiError) {
-          console.log(`[DEV] AI matching failed: ${aiError}`);
-        }
-      }
-
-      // Last resort: first non-empty option
-      if (!match) match = options.find((o) => o.value || o.text);
-
-      if (match) {
-        // Try multiple methods to select the option with timeout protection
-        try {
-          // Method 1: selectOption by value
-          await el.selectOption({ value: match.value });
-          await context.waitForTimeout(200);
-
-          // Verify selection with timeout
-          try {
-            const verifyPromise = el.evaluate((el: HTMLSelectElement) => el.value);
-            const timeoutPromise = new Promise<string>((_, reject) => {
-              setTimeout(() => reject(new Error('Verification timeout')), 2000);
-            });
-
-            const selectedValue = await Promise.race([verifyPromise, timeoutPromise]);
-            if (selectedValue === match.value) {
-              console.log(
-                `[DEV] Selected option "${match.text}" (value: ${match.value}) for selector: ${selector}`
-              );
-              return true;
-            }
-          } catch (verifyError) {
-            console.log(`[DEV] Verification failed, but assuming selection worked`);
-            return true; // Assume it worked if we got here
-          }
-        } catch (e1) {
-          console.log(`[DEV] selectOption by value failed, trying by label...`);
-        }
-
-        try {
-          // Method 2: selectOption by label
-          await el.selectOption({ label: match.text });
-          await context.waitForTimeout(200);
-          console.log(`[DEV] Selected option "${match.text}" by label for selector: ${selector}`);
-          return true;
-        } catch (e2) {
-          console.log(`[DEV] selectOption by label failed, trying JavaScript...`);
-        }
-
-        try {
-          // Method 3: JavaScript direct assignment
-          await el.evaluate((element: HTMLSelectElement, value: string) => {
-            element.value = value;
-            element.dispatchEvent(new Event('change', { bubbles: true }));
-            element.dispatchEvent(new Event('input', { bubbles: true }));
-          }, match.value);
-          await context.waitForTimeout(200);
-          console.log(
-            `[DEV] Selected option "${match.text}" via JavaScript for selector: ${selector}`
-          );
-          return true;
-        } catch (e3) {
-          console.log(`[DEV] JavaScript selection failed`);
-        }
-      }
-    } catch (e) {
-      console.log(`[DEV] Error selecting option: ${e}`);
-    }
-    return false;
-  }
-
-  async fillApplication(
-    jobUrl: string,
-    userProfile: UserProfile,
-    coverLetter: string,
-    resumePath: string,
-    applyLink?: string, // If provided and different from jobUrl, navigate to this URL first
-    resumeText?: string // Resume text for AI processing
-  ): Promise<ApplicationResult> {
-    // Check environment variable to determine behavior
-    const autoSubmit = process.env.JOB_AGENT_AUTO_SUBMIT === 'true';
-
-    if (autoSubmit) {
-      return this.fillApplicationAndSubmit(
-        jobUrl,
-        userProfile,
-        coverLetter,
-        resumePath,
-        applyLink,
-        resumeText
-      );
-    } else {
-      return this.fillApplicationForReview(
-        jobUrl,
-        userProfile,
-        coverLetter,
-        resumePath,
-        applyLink,
-        resumeText
-      );
-    }
-  }
-
-  private async fillApplicationAndSubmit(
-    jobUrl: string,
-    userProfile: UserProfile,
-    coverLetter: string,
-    resumePath: string,
-    applyLink?: string,
-    resumeText?: string
-  ): Promise<ApplicationResult> {
-    if (!this.browser) {
-      await this.init();
-    }
-
-    const page = await this.browser!.newPage();
-
-    try {
-      // Determine which URL to start from
-      let formUrl = jobUrl;
-
-      // Check if jobUrl already looks like an application page
-      const jobUrlLower = jobUrl.toLowerCase();
-      const isAlreadyApplyPage =
-        jobUrlLower.includes('/apply') ||
-        jobUrlLower.includes('/application') ||
-        jobUrlLower.includes('application-form') ||
-        jobUrlLower.includes('careers/apply');
-
-      if (applyLink && applyLink !== jobUrl) {
-        formUrl = applyLink;
-      }
-
-      console.log(`[DEV] Filling application - Job URL: ${jobUrl}`);
-      console.log(`[DEV] Navigating to form URL: ${formUrl}`);
-      await page.goto(formUrl, { waitUntil: 'networkidle' });
-      await page.waitForLoadState('domcontentloaded');
-
-      // Step 1: Parse all form fields on the page
-      console.log(`[DEV] Parsing form fields on: ${formUrl}`);
-      const parsedFields = await this.parseFormFields(page);
-      console.log(`[DEV] Found ${parsedFields.length} form fields`);
-
-      // If no form fields found, try different strategies
-      if (parsedFields.length === 0) {
-        // Strategy 1: If we have a valid applyLink, navigate to it
-        if (applyLink && applyLink !== formUrl && !isAlreadyApplyPage) {
-          console.log(
-            `[DEV] No form fields found on job page, navigating to apply link: ${applyLink}`
-          );
-          await page.goto(applyLink, { waitUntil: 'networkidle' });
-          await page.waitForTimeout(3000);
-
-          // Re-parse fields on the apply page
-          const applyPageFields = await this.parseFormFields(page);
-          console.log(`[DEV] Found ${applyPageFields.length} form fields on apply page`);
-          parsedFields.push(...applyPageFields);
-        }
-
-        // Strategy 2: If still no fields, try clicking apply buttons to trigger JavaScript navigation/forms
-        if (parsedFields.length === 0) {
-          console.log(`[DEV] No form fields found, trying to click apply buttons...`);
-
-          // Look for apply buttons and click them
-          const allButtons = await page.$$('[class*="apply"], button, a');
-          const applyButtons: any[] = [];
-
-          for (const el of allButtons) {
-            const text = await el.textContent();
-            const className = (await el.getAttribute('class')) || '';
-            if (
-              text?.toLowerCase().includes('apply') ||
-              className.toLowerCase().includes('apply') ||
-              className.toLowerCase().includes('cta')
-            ) {
-              applyButtons.push(el);
-            }
-          }
-
-          console.log(`[DEV] Found ${applyButtons.length} potential apply buttons`);
-
-          for (const button of applyButtons.slice(0, 3)) {
-            // Try first 3 buttons
-            try {
-              const buttonText = await button.textContent();
-              console.log(`[DEV] Clicking apply button: "${buttonText?.trim()}"`);
-
-              // Check if this button will navigate to a different page
-              const willNavigate = await this.checkIfElementWillNavigate(button, formUrl);
-              if (willNavigate) {
-                console.log(
-                  `[DEV] Skipping apply button "${buttonText?.trim()}" - it will navigate to a different page`
-                );
-                continue;
-              }
-
-              await button.click();
-              await page.waitForTimeout(2000); // Wait for potential navigation or form reveal
-
-              // Check if URL changed (navigation)
-              const currentUrl = page.url();
-              console.log(`[DEV] After click, URL is: ${currentUrl}`);
-
-              // Re-parse fields
-              const newFields = await this.parseFormFields(page);
-              console.log(`[DEV] After click, found ${newFields.length} form fields`);
-
-              if (newFields.length > 0) {
-                parsedFields.push(...newFields);
-                break; // Stop trying other buttons if we found fields
-              }
-            } catch (error) {
-              console.log(`[DEV] Error clicking button:`, error);
-            }
-          }
-        }
-      }
-
-      // Log all found fields for debugging
-      parsedFields.forEach((field) => {
-        console.log(
-          `[DEV] Field found: ${field.fieldName} (${field.elementType}${
-            field.inputType ? `/${field.inputType}` : ''
-          }) - Label: "${field.label}" - Placeholder: "${field.placeholder}" - Required: ${
-            field.required
-          }`
-        );
-      });
-
-      // Step 2: Map fields to data, using AI where needed
-      console.log(`[DEV] Mapping fields to data...`);
-      const fieldMappings = await this.mapFieldsToData(
-        parsedFields,
-        userProfile,
-        coverLetter,
-        resumeText || ''
-      );
-
-      // Step 3: Fill all mapped fields
-      console.log(`[DEV] Filling form fields...`);
-      let coverLetterFilled = false;
-
-      for (const mapping of fieldMappings) {
-        const { field, mappedData } = mapping;
-        try {
-          if (field.elementType === 'select') {
-            await this.selectBestOption(
-              page,
-              field.selector,
-              field.options,
-              mappedData,
-              field.frame,
-              field.label || field.placeholder
-            );
-            continue;
-          }
-
-          // Handle date inputs
-          if (
-            field.elementType === 'input' &&
-            (field.inputType === 'date' || field.inputType === 'datetime-local')
-          ) {
-            const context: Frame | Page = field.frame || page;
-            await this.fillDateField(context, field, mappedData);
-            continue;
-          }
-
-          if (field.elementType === 'input' && field.inputType === 'checkbox') {
-            const shouldCheck = (() => {
-              // If label implies terms/privacy/consent and required, check it
-              const label = (field.label || '').toLowerCase();
-              if (label.includes('terms') || label.includes('privacy') || label.includes('consent'))
-                return true;
-              const yn = this.normalizeYesNo(mappedData);
-              return yn === 'yes';
-            })();
-            const context: Frame | Page = field.frame || page;
-            const el = await context.$(field.selector);
-            if (el) {
-              const checked = await el.isChecked().catch(() => false as any);
-              if (shouldCheck && !checked) {
-                await el.check();
-                console.log(`[DEV] Checked checkbox for "${field.fieldName}"`);
-              }
-            }
-            continue;
-          }
-
-          if (field.elementType === 'input' && field.inputType === 'radio') {
-            if (field.options && field.options.length > 0) {
-              const context: Frame | Page = field.frame || page;
-              const name = field.fieldName;
-              const radios = await context.$$(`input[type="radio"][name="${name}"]`);
-
-              if (radios.length > 0) {
-                // Enhanced radio button selection logic
-                let clicked = false;
-                const target = (mappedData || '').toLowerCase().trim();
-
-                // First try: exact value match
-                for (const radio of radios) {
-                  const value = (await radio.getAttribute('value')) || '';
-                  if (value.toLowerCase() === target) {
-                    await radio.click();
-                    console.log(
-                      `[DEV] Selected radio "${value}" for "${name}" (exact value match)`
-                    );
-                    clicked = true;
-                    break;
-                  }
-                }
-
-                // Second try: partial value match
-                if (!clicked && target) {
-                  for (const radio of radios) {
-                    const value = (await radio.getAttribute('value')) || '';
-                    if (
-                      value.toLowerCase().includes(target) ||
-                      target.includes(value.toLowerCase())
-                    ) {
-                      await radio.click();
-                      console.log(
-                        `[DEV] Selected radio "${value}" for "${name}" (partial value match)`
-                      );
-                      clicked = true;
-                      break;
-                    }
-                  }
-                }
-
-                // Third try: check associated labels for text match
-                if (!clicked && target) {
-                  for (const radio of radios) {
-                    const radioId = await radio.getAttribute('id');
-                    if (radioId) {
-                      const label = await context.$(`label[for="${radioId}"]`);
-                      if (label) {
-                        const labelText = (await label.textContent())?.toLowerCase() || '';
-                        if (labelText.includes(target)) {
-                          await radio.click();
-                          console.log(
-                            `[DEV] Selected radio with label "${labelText}" for "${name}"`
-                          );
-                          clicked = true;
-                          break;
-                        }
-                      }
-                    }
-                  }
-                }
-
-                // Fourth try: check parent element text (common pattern)
-                if (!clicked && target) {
-                  for (const radio of radios) {
-                    const parentText = await radio.evaluate((el) => {
-                      const parent = el.parentElement;
-                      return parent ? parent.textContent?.toLowerCase() || '' : '';
-                    });
-                    if (parentText.includes(target)) {
-                      await radio.click();
-                      console.log(
-                        `[DEV] Selected radio with parent text containing "${target}" for "${name}"`
-                      );
-                      clicked = true;
-                      break;
-                    }
-                  }
-                }
-
-                // Fifth try: yes/no normalization for boolean questions
-                if (!clicked) {
-                  const yn = this.normalizeYesNo(mappedData);
-                  if (yn) {
-                    for (const radio of radios) {
-                      const value = (await radio.getAttribute('value')) || '';
-                      const parentText = await radio.evaluate((el) => {
-                        const parent = el.parentElement;
-                        return parent ? parent.textContent?.toLowerCase() || '' : '';
-                      });
-                      if (value.toLowerCase().includes(yn) || parentText.includes(yn)) {
-                        await radio.click();
-                        console.log(
-                          `[DEV] Selected radio "${value}" for "${name}" (yes/no: ${yn})`
-                        );
-                        clicked = true;
-                        break;
-                      }
-                    }
-                  }
-                }
-
-                // Sixth try: Use AI to select best radio option
-                if (!clicked && field.options && field.options.length > 0) {
-                  try {
-                    const optionsText = field.options
-                      .map((o, i) => `${i + 1}. ${o.text} (value: ${o.value})`)
-                      .join('\n');
-                    const fieldLabel = field.label || field.placeholder || field.fieldName;
-                    const aiPrompt = mappedData
-                      ? `Given this radio button field "${fieldLabel}" with desired value "${mappedData}" and the following options:\n${optionsText}\n\nSelect the BEST option number (1-${field.options.length}) that matches or is closest to "${mappedData}". Respond with ONLY the number.`
-                      : `Given this radio button field "${fieldLabel}" with the following options:\n${optionsText}\n\nBased on the resume context, select the BEST option number (1-${field.options.length}) that most accurately represents the candidate's situation. Respond with ONLY the number.`;
-
-                    // Add timeout to prevent hanging
-                    const aiPromise = generateText(
-                      'You are an assistant helping fill out job application forms. Select the best option from radio buttons.',
-                      aiPrompt
-                    );
-
-                    const timeoutPromise = new Promise<string>((_, reject) => {
-                      setTimeout(() => reject(new Error('AI timeout')), 8000); // 8 second timeout
-                    });
-
-                    const aiResponse = await Promise.race([aiPromise, timeoutPromise]);
-
-                    const selectedIndex =
-                      parseInt(aiResponse.trim().match(/\d+/)?.[0] || '1', 10) - 1;
-                    if (
-                      selectedIndex >= 0 &&
-                      selectedIndex < field.options.length &&
-                      selectedIndex < radios.length
-                    ) {
-                      await radios[selectedIndex].click();
-                      const value =
-                        (await radios[selectedIndex].getAttribute('value')) ||
-                        field.options[selectedIndex].value;
-                      console.log(
-                        `[DEV] AI selected radio "${value}" (option ${selectedIndex + 1}) for "${name}"`
-                      );
-                      clicked = true;
-                    }
-                  } catch (aiError) {
-                    console.log(`[DEV] AI selection for radio failed: ${aiError}`);
-                  }
-                }
-
-                // Final fallback: select first option
-                if (!clicked) {
-                  await radios[0].click();
-                  const value = (await radios[0].getAttribute('value')) || 'first option';
-                  console.log(`[DEV] Selected first radio option "${value}" for "${name}"`);
-                }
-              }
-            }
-            continue;
-          }
-
-          // Handle resume/cover letter - check if it's a file input or text input
-          const fieldInfo =
-            `${field.label || ''} ${field.placeholder || ''} ${field.fieldName}`.toLowerCase();
-          const isResumeField = fieldInfo.includes('resume') || fieldInfo.includes('cv');
-          const isCoverLetterField = fieldInfo.includes('cover') && fieldInfo.includes('letter');
-
-          if (isResumeField || isCoverLetterField) {
-            const context: Frame | Page = field.frame || page;
-            const el = await context.$(field.selector);
-
-            if (el) {
-              // Check if it's a file input
-              const tagName = await el.evaluate((el: Element) => el.tagName.toLowerCase());
-              const inputType = await el.getAttribute('type');
-
-              if (tagName === 'input' && inputType === 'file') {
-                // It's a file input - upload file
-                if (isResumeField && resumePath) {
-                  try {
-                    await el.setInputFiles(resumePath);
-                    console.log(`[DEV] Uploaded resume file: "${resumePath}"`);
-                  } catch (error) {
-                    console.log(`[DEV] Error uploading resume file: ${error}`);
-                  }
-                } else if (isCoverLetterField) {
-                  // Cover letter as file - create a temporary file if needed
-                  // For now, skip file upload for cover letter (usually text)
-                  console.log(
-                    `[DEV] Cover letter field is file input, but cover letter is text - skipping`
-                  );
-                }
-              } else {
-                // It's a text input/textarea - fill with text
-                if (isCoverLetterField && coverLetter) {
-                  try {
-                    await el.fill(coverLetter);
-                    console.log(`[DEV] Filled cover letter text field`);
-                    coverLetterFilled = true;
-                  } catch (error) {
-                    console.log(`[DEV] Error filling cover letter: ${error}`);
-                  }
-                } else if (isResumeField) {
-                  // Resume field as text - might be a resume URL or text field
-                  // For now, skip (resume should be uploaded as file)
-                  console.log(
-                    `[DEV] Resume field is text input, but resume should be uploaded as file - skipping`
-                  );
-                }
-              }
-            }
-            continue;
-          }
-
-          // Default: fill text-like inputs and textareas
-          if (mappedData) {
-            const context: Frame | Page = field.frame || page;
-            const el = await context.$(field.selector);
-            if (el) {
-              // Transform value before filling
-              const transformedValue = this.transformValueForFieldType(mappedData, field);
-
-              try {
-                await el.fill(transformedValue || mappedData);
-                console.log(
-                  `[DEV] Filled field "${field.fieldName}": "${(transformedValue || mappedData).substring(0, 120)}${
-                    (transformedValue || mappedData).length > 120 ? '...' : ''
-                  }"`
-                );
-              } catch (error) {
-                // Try using JavaScript if fill fails
-                try {
-                  await el.evaluate(
-                    (element: HTMLInputElement | HTMLTextAreaElement, value: string) => {
-                      element.value = value;
-                      element.dispatchEvent(new Event('input', { bubbles: true }));
-                      element.dispatchEvent(new Event('change', { bubbles: true }));
-                    },
-                    transformedValue || mappedData
-                  );
-                  console.log(`[DEV] Filled field "${field.fieldName}" via JavaScript`);
-                } catch (jsError) {
-                  console.log(`[DEV] Error filling field "${field.fieldName}": ${jsError}`);
-                }
-              }
-            } else {
-              console.log(`[DEV] Could not find element for field: ${field.fieldName}`);
-            }
-          }
-        } catch (error) {
-          console.log(`[DEV] Error filling field "${field.fieldName}":`, error as any);
-        }
-      }
-
-      // Step 3.5: Fallback for cover letter if not filled via normal mapping
-      if (!coverLetterFilled && coverLetter) {
-        console.log(
-          `[DEV] Cover letter not filled via normal mapping, searching for "cover letter" keyword elements...`
-        );
-        const coverLetterFilledFallback = await this.searchAndFillCoverLetterByKeyword(
-          page,
-          coverLetter
-        );
-        if (!coverLetterFilledFallback) {
-          // Try iframes
-          const iframes = await page.$$('iframe');
-          for (let i = 0; i < iframes.length; i++) {
-            try {
-              const frame = await iframes[i].contentFrame();
-              if (frame) {
-                const frameCoverLetterFilled = await this.searchAndFillCoverLetterByKeyword(
-                  frame,
-                  coverLetter
-                );
-                if (frameCoverLetterFilled) {
-                  console.log(`[DEV] Filled cover letter via keyword search in iframe ${i}`);
-                  coverLetterFilled = true;
-                  break;
-                }
-              }
-            } catch (error) {
-              // Continue trying other iframes
-            }
-          }
-        } else {
-          coverLetterFilled = true;
-        }
-      }
-
-      // Step 3.6: Handle dynamic "Add" buttons for education/experience sections
-      console.log(`[DEV] Looking for "Add" buttons for education/experience sections...`);
-      const newFieldsAdded = await this.handleAddButtons(page);
-
-      // If new fields were added, re-parse and fill them
-      if (newFieldsAdded > 0) {
-        console.log(`[DEV] Re-parsing form after clicking ${newFieldsAdded} "Add" buttons...`);
-
-        // Re-parse fields after add button clicks
-        const newParsedFields = await this.parseFormFields(page);
-        const newFields = newParsedFields.filter(
-          (newField) =>
-            !parsedFields.some((existingField) => existingField.selector === newField.selector)
-        );
-
-        console.log(`[DEV] Found ${newFields.length} new fields after add button clicks`);
-
-        if (newFields.length > 0) {
-          // Map and fill the new fields
-          const newFieldMappings = await this.mapFieldsToData(
-            newFields,
-            userProfile,
-            coverLetter,
-            resumeText || ''
-          );
-
-          // Fill the new fields
-          for (const mapping of newFieldMappings) {
-            const { field, mappedData } = mapping;
-            try {
-              if (field.elementType === 'select') {
-                await this.selectBestOption(
-                  page,
-                  field.selector,
-                  field.options,
-                  mappedData,
-                  field.frame
-                );
-                continue;
-              }
-
-              if (field.elementType === 'input' && field.inputType === 'radio') {
-                if (field.options && field.options.length > 0) {
-                  const context: Frame | Page = field.frame || page;
-                  const name = field.fieldName;
-                  const radios = await context.$$(`input[type="radio"][name="${name}"]`);
-
-                  if (radios.length > 0) {
-                    let clicked = false;
-                    const target = (mappedData || '').toLowerCase().trim();
-
-                    // Try exact value match first
-                    for (const radio of radios) {
-                      const value = (await radio.getAttribute('value')) || '';
-                      if (value.toLowerCase() === target) {
-                        await radio.click();
-                        console.log(`[DEV] Selected new radio "${value}" for "${name}"`);
-                        clicked = true;
-                        break;
-                      }
-                    }
-
-                    // Fallback: yes/no or first option
-                    if (!clicked) {
-                      const yn = this.normalizeYesNo(mappedData);
-                      if (yn) {
-                        for (const radio of radios) {
-                          const value = (await radio.getAttribute('value')) || '';
-                          if (value.toLowerCase().includes(yn)) {
-                            await radio.click();
-                            console.log(
-                              `[DEV] Selected new radio "${value}" for "${name}" (yes/no: ${yn})`
-                            );
-                            clicked = true;
-                            break;
-                          }
-                        }
-                      }
-                    }
-
-                    if (!clicked && radios.length > 0) {
-                      await radios[0].click();
-                      console.log(`[DEV] Selected first option for new radio field "${name}"`);
-                    }
-                  }
-                }
-                continue;
-              }
-
-              // Fill text inputs and textareas
-              if (mappedData) {
-                const context: Frame | Page = field.frame || page;
-                const el = await context.$(field.selector);
-                if (el) {
-                  await el.fill(mappedData);
-                  console.log(
-                    `[DEV] Filled new field "${field.fieldName}": "${mappedData.substring(0, 50)}${
-                      mappedData.length > 50 ? '...' : ''
-                    }"`
-                  );
-                }
-              }
-            } catch (error) {
-              console.log(`[DEV] Error filling new field "${field.fieldName}":`, error);
-            }
-          }
-        }
-      }
-
-      // Step 4: Upload resume if needed
-      await this.uploadResume(page, resumePath);
-
-      // Step 5: Take screenshot before submission
-      const screenshot = await page.screenshot({ fullPage: true });
-
-      // Step 6: Find and click submit button
-      console.log(`[DEV] Looking for submit button...`);
-      let submitted = false;
-
-      // Helper function to find button by text
-      const findButtonByText = async (textPatterns: string[]): Promise<boolean> => {
-        // First try main document
-        const buttons = await page.$$('button, input[type="submit"], input[type="button"]');
-
-        for (const button of buttons) {
-          const text = await button.textContent();
-          const value = await button.getAttribute('value');
-          const ariaLabel = await button.getAttribute('aria-label');
-
-          const fullText = `${text} ${value} ${ariaLabel}`.toLowerCase();
-
-          for (const pattern of textPatterns) {
-            if (fullText.includes(pattern.toLowerCase())) {
-              console.log(
-                `[DEV] Clicking submit button: "${text || value || ariaLabel}" (matched pattern: "${pattern}")`
-              );
-              await button.click();
-              return true;
-            }
-          }
-        }
-
-        // If not found in main document, try iframes
-        const iframes = await page.$$('iframe');
-        for (let i = 0; i < iframes.length; i++) {
-          try {
-            const frame = await iframes[i].contentFrame();
-            if (frame) {
-              const frameButtons = await frame.$$(
-                'button, input[type="submit"], input[type="button"]'
-              );
-
-              for (const button of frameButtons) {
-                const text = await button.textContent();
-                const value = await button.getAttribute('value');
-                const ariaLabel = await button.getAttribute('aria-label');
-
-                const fullText = `${text} ${value} ${ariaLabel}`.toLowerCase();
-
-                for (const pattern of textPatterns) {
-                  if (fullText.includes(pattern.toLowerCase())) {
-                    console.log(
-                      `[DEV] Clicking submit button in iframe ${i}: "${text || value || ariaLabel}" (matched pattern: "${pattern}")`
-                    );
-                    await button.click();
-                    return true;
-                  }
-                }
-              }
-            }
-          } catch (error) {
-            // Continue trying other iframes
-          }
-        }
-
-        return false;
-      };
-
-      // Priority order for finding submit button
-      const submitTextPatterns = [
-        ['submit', 'application'],
-        ['apply', 'now'],
-        ['submit'],
-        ['apply'],
-        ['send'],
-      ];
-
-      for (const patterns of submitTextPatterns) {
-        if (await findButtonByText(patterns)) {
-          submitted = true;
-          break;
-        }
-      }
-
-      // Fallback to CSS selector if text search fails
-      if (!submitted) {
-        const submitSelectors = [
-          'button[type="submit"]',
-          'input[type="submit"]',
-          '[data-testid*="submit"]',
-          '[data-testid*="apply"]',
-        ];
-
-        // First try main document
-        for (const selector of submitSelectors) {
-          try {
-            const submitButton = await page.$(selector);
-            if (submitButton) {
-              const buttonText = await submitButton.textContent();
-              console.log(
-                `[DEV] Clicking submit button via CSS selector: "${buttonText || 'button'}" (selector: ${selector})`
-              );
-              await submitButton.click();
-              submitted = true;
-              break;
-            }
-          } catch (error) {
-            // Continue trying other selectors
-          }
-        }
-
-        // If not found in main document, try iframes
-        if (!submitted) {
-          const iframes = await page.$$('iframe');
-          for (let i = 0; i < iframes.length; i++) {
-            if (submitted) break;
-            try {
-              const frame = await iframes[i].contentFrame();
-              if (frame) {
-                for (const selector of submitSelectors) {
-                  try {
-                    const submitButton = await frame.$(selector);
-                    if (submitButton) {
-                      const buttonText = await submitButton.textContent();
-                      console.log(
-                        `[DEV] Clicking submit button in iframe ${i} via CSS selector: "${buttonText || 'button'}" (selector: ${selector})`
-                      );
-                      await submitButton.click();
-                      submitted = true;
-                      break;
-                    }
-                  } catch (error) {
-                    // Continue trying other selectors
-                  }
-                }
-              }
-            } catch (error) {
-              // Continue trying other iframes
-            }
-          }
-        }
-      }
-
-      if (!submitted) {
-        console.log(`[DEV] Could not find submit button - application not submitted`);
-        return {
-          success: false,
-          error: 'Could not find submit button',
-          screenshot,
-        };
-      }
-
-      // Wait for submission to complete
-      await page.waitForTimeout(5000);
-
-      console.log(`[DEV] Application submitted successfully at ${new Date().toISOString()}`);
-      return {
-        success: true,
-        screenshot,
-        submittedAt: new Date(),
-      };
-    } catch (error) {
-      console.log(`[DEV] Application submission failed: ${error}`);
-      const screenshot = await page.screenshot({ fullPage: true });
-      return {
-        success: false,
-        error: `Application failed: ${error}`,
-        screenshot,
-      };
-    } finally {
-      await page.close();
-    }
-  }
-
-  private async fillApplicationForReview(
-    jobUrl: string,
-    userProfile: UserProfile,
-    coverLetter: string,
-    resumePath: string,
-    applyLink?: string,
-    resumeText?: string
-  ): Promise<ApplicationResult> {
-    if (!this.browser) {
-      await this.init();
-    }
-
-    const page = await this.browser!.newPage();
-
-    try {
-      // Determine which URL to start from
-      let formUrl = jobUrl;
-
-      // Check if jobUrl already looks like an application page
-      const jobUrlLower = jobUrl.toLowerCase();
-      const isAlreadyApplyPage =
-        jobUrlLower.includes('/apply') ||
-        jobUrlLower.includes('/application') ||
-        jobUrlLower.includes('application-form') ||
-        jobUrlLower.includes('careers/apply');
-
-      if (applyLink && applyLink !== jobUrl) {
-        formUrl = applyLink;
-      }
-
-      console.log(`[DEV] Filling application - Job URL: ${jobUrl}`);
-      console.log(`[DEV] Navigating to form URL: ${formUrl}`);
-      await page.goto(formUrl, { waitUntil: 'networkidle' });
-      await page.waitForLoadState('domcontentloaded');
-
-      // Step 1: Parse all form fields on the page
-      console.log(`[DEV] Parsing form fields on: ${formUrl}`);
-      const parsedFields = await this.parseFormFields(page);
-      console.log(`[DEV] Found ${parsedFields.length} form fields`);
-
-      // If no form fields found, try different strategies
-      if (parsedFields.length === 0) {
-        // Strategy 1: If we have a valid applyLink, navigate to it
-        if (applyLink && applyLink !== formUrl && !isAlreadyApplyPage) {
-          console.log(
-            `[DEV] No form fields found on job page, navigating to apply link: ${applyLink}`
-          );
-          await page.goto(applyLink, { waitUntil: 'networkidle' });
-          await page.waitForTimeout(3000);
-
-          // Re-parse fields on the apply page
-          const applyPageFields = await this.parseFormFields(page);
-          console.log(`[DEV] Found ${applyPageFields.length} form fields on apply page`);
-          parsedFields.push(...applyPageFields);
-        }
-
-        // Strategy 2: If still no fields, try clicking apply buttons to trigger JavaScript navigation/forms
-        if (parsedFields.length === 0) {
-          console.log(`[DEV] No form fields found, trying to click apply buttons...`);
-
-          // Look for apply buttons and click them
-          const allButtons = await page.$$('[class*="apply"], button, a');
-          const applyButtons: any[] = [];
-
-          for (const el of allButtons) {
-            const text = await el.textContent();
-            const className = (await el.getAttribute('class')) || '';
-            if (
-              text?.toLowerCase().includes('apply') ||
-              className.toLowerCase().includes('apply') ||
-              className.toLowerCase().includes('cta')
-            ) {
-              applyButtons.push(el);
-            }
-          }
-
-          console.log(`[DEV] Found ${applyButtons.length} potential apply buttons`);
-
-          for (const button of applyButtons.slice(0, 3)) {
-            // Try first 3 buttons
-            try {
-              const buttonText = await button.textContent();
-              console.log(`[DEV] Clicking apply button: "${buttonText?.trim()}"`);
-
-              // Check if this button will navigate to a different page
-              const willNavigate = await this.checkIfElementWillNavigate(button, formUrl);
-              if (willNavigate) {
-                console.log(
-                  `[DEV] Skipping apply button "${buttonText?.trim()}" - it will navigate to a different page`
-                );
-                continue;
-              }
-
-              await button.click();
-              await page.waitForTimeout(2000); // Wait for potential navigation or form reveal
-
-              // Check if URL changed (navigation)
-              const currentUrl = page.url();
-              console.log(`[DEV] After click, URL is: ${currentUrl}`);
-
-              // Re-parse fields
-              const newFields = await this.parseFormFields(page);
-              console.log(`[DEV] After click, found ${newFields.length} form fields`);
-
-              if (newFields.length > 0) {
-                parsedFields.push(...newFields);
-                break; // Stop trying other buttons if we found fields
-              }
-            } catch (error) {
-              console.log(`[DEV] Error clicking button:`, error);
-            }
-          }
-        }
-      }
-
-      // Log all found fields for debugging
-      parsedFields.forEach((field) => {
-        console.log(
-          `[DEV] Field found: ${field.fieldName} (${field.elementType}${
-            field.inputType ? `/${field.inputType}` : ''
-          }) - Label: "${field.label}" - Placeholder: "${field.placeholder}" - Required: ${
-            field.required
-          }`
-        );
-      });
-
-      // Step 2: Map fields to data, using AI where needed
-      console.log(`[DEV] Mapping fields to data...`);
-      const fieldMappings = await this.mapFieldsToData(
-        parsedFields,
-        userProfile,
-        coverLetter,
-        resumeText || ''
-      );
-
-      // Step 3: Fill all mapped fields
-      console.log(`[DEV] Filling form fields...`);
-      let coverLetterFilled = false;
-
-      for (const mapping of fieldMappings) {
-        const { field, mappedData } = mapping;
-        try {
-          if (field.elementType === 'select') {
-            await this.selectBestOption(
-              page,
-              field.selector,
-              field.options,
-              mappedData,
-              field.frame,
-              field.label || field.placeholder
-            );
-            continue;
-          }
-
-          // Handle date inputs
-          if (
-            field.elementType === 'input' &&
-            (field.inputType === 'date' || field.inputType === 'datetime-local')
-          ) {
-            const context: Frame | Page = field.frame || page;
-            await this.fillDateField(context, field, mappedData);
-            continue;
-          }
-
-          if (field.elementType === 'input' && field.inputType === 'checkbox') {
-            const shouldCheck = (() => {
-              // If label implies terms/privacy/consent and required, check it
-              const label = (field.label || '').toLowerCase();
-              if (label.includes('terms') || label.includes('privacy') || label.includes('consent'))
-                return true;
-              const yn = this.normalizeYesNo(mappedData);
-              return yn === 'yes';
-            })();
-            const context: Frame | Page = field.frame || page;
-            const el = await context.$(field.selector);
-            if (el) {
-              const checked = await el.isChecked().catch(() => false as any);
-              if (shouldCheck && !checked) {
-                await el.check();
-                console.log(`[DEV] Checked checkbox for "${field.fieldName}"`);
-              }
-            }
-            continue;
-          }
-
-          if (field.elementType === 'input' && field.inputType === 'radio') {
-            if (field.options && field.options.length > 0) {
-              const context: Frame | Page = field.frame || page;
-              const name = field.fieldName;
-              const radios = await context.$$(`input[type="radio"][name="${name}"]`);
-
-              if (radios.length > 0) {
-                // Enhanced radio button selection logic
-                let clicked = false;
-                const target = (mappedData || '').toLowerCase().trim();
-
-                // First try: exact value match
-                for (const radio of radios) {
-                  const value = (await radio.getAttribute('value')) || '';
-                  if (value.toLowerCase() === target) {
-                    await radio.click();
-                    console.log(
-                      `[DEV] Selected radio "${value}" for "${name}" (exact value match)`
-                    );
-                    clicked = true;
-                    break;
-                  }
-                }
-
-                // Second try: partial value match
-                if (!clicked && target) {
-                  for (const radio of radios) {
-                    const value = (await radio.getAttribute('value')) || '';
-                    if (
-                      value.toLowerCase().includes(target) ||
-                      target.includes(value.toLowerCase())
-                    ) {
-                      await radio.click();
-                      console.log(
-                        `[DEV] Selected radio "${value}" for "${name}" (partial value match)`
-                      );
-                      clicked = true;
-                      break;
-                    }
-                  }
-                }
-
-                // Third try: check associated labels for text match
-                if (!clicked && target) {
-                  for (const radio of radios) {
-                    const radioId = await radio.getAttribute('id');
-                    if (radioId) {
-                      const label = await context.$(`label[for="${radioId}"]`);
-                      if (label) {
-                        const labelText = (await label.textContent())?.toLowerCase() || '';
-                        if (labelText.includes(target)) {
-                          await radio.click();
-                          console.log(
-                            `[DEV] Selected radio with label "${labelText}" for "${name}"`
-                          );
-                          clicked = true;
-                          break;
-                        }
-                      }
-                    }
-                  }
-                }
-
-                // Fourth try: check parent element text (common pattern)
-                if (!clicked && target) {
-                  for (const radio of radios) {
-                    const parentText = await radio.evaluate((el) => {
-                      const parent = el.parentElement;
-                      return parent ? parent.textContent?.toLowerCase() || '' : '';
-                    });
-                    if (parentText.includes(target)) {
-                      await radio.click();
-                      console.log(
-                        `[DEV] Selected radio with parent text containing "${target}" for "${name}"`
-                      );
-                      clicked = true;
-                      break;
-                    }
-                  }
-                }
-
-                // Fifth try: yes/no normalization for boolean questions
-                if (!clicked) {
-                  const yn = this.normalizeYesNo(mappedData);
-                  if (yn) {
-                    for (const radio of radios) {
-                      const value = (await radio.getAttribute('value')) || '';
-                      const parentText = await radio.evaluate((el) => {
-                        const parent = el.parentElement;
-                        return parent ? parent.textContent?.toLowerCase() || '' : '';
-                      });
-                      if (value.toLowerCase().includes(yn) || parentText.includes(yn)) {
-                        await radio.click();
-                        console.log(
-                          `[DEV] Selected radio "${value}" for "${name}" (yes/no: ${yn})`
-                        );
-                        clicked = true;
-                        break;
-                      }
-                    }
-                  }
-                }
-
-                // Sixth try: Use AI to select best radio option
-                if (!clicked && field.options && field.options.length > 0) {
-                  try {
-                    const optionsText = field.options
-                      .map((o, i) => `${i + 1}. ${o.text} (value: ${o.value})`)
-                      .join('\n');
-                    const fieldLabel = field.label || field.placeholder || field.fieldName;
-                    const aiPrompt = mappedData
-                      ? `Given this radio button field "${fieldLabel}" with desired value "${mappedData}" and the following options:\n${optionsText}\n\nSelect the BEST option number (1-${field.options.length}) that matches or is closest to "${mappedData}". Respond with ONLY the number.`
-                      : `Given this radio button field "${fieldLabel}" with the following options:\n${optionsText}\n\nBased on the resume context, select the BEST option number (1-${field.options.length}) that most accurately represents the candidate's situation. Respond with ONLY the number.`;
-
-                    // Add timeout to prevent hanging
-                    const aiPromise = generateText(
-                      'You are an assistant helping fill out job application forms. Select the best option from radio buttons.',
-                      aiPrompt
-                    );
-
-                    const timeoutPromise = new Promise<string>((_, reject) => {
-                      setTimeout(() => reject(new Error('AI timeout')), 8000); // 8 second timeout
-                    });
-
-                    const aiResponse = await Promise.race([aiPromise, timeoutPromise]);
-
-                    const selectedIndex =
-                      parseInt(aiResponse.trim().match(/\d+/)?.[0] || '1', 10) - 1;
-                    if (
-                      selectedIndex >= 0 &&
-                      selectedIndex < field.options.length &&
-                      selectedIndex < radios.length
-                    ) {
-                      await radios[selectedIndex].click();
-                      const value =
-                        (await radios[selectedIndex].getAttribute('value')) ||
-                        field.options[selectedIndex].value;
-                      console.log(
-                        `[DEV] AI selected radio "${value}" (option ${selectedIndex + 1}) for "${name}"`
-                      );
-                      clicked = true;
-                    }
-                  } catch (aiError) {
-                    console.log(`[DEV] AI selection for radio failed: ${aiError}`);
-                  }
-                }
-
-                // Final fallback: select first option
-                if (!clicked) {
-                  await radios[0].click();
-                  const value = (await radios[0].getAttribute('value')) || 'first option';
-                  console.log(`[DEV] Selected first radio option "${value}" for "${name}"`);
-                }
-              }
-            }
-            continue;
-          }
-
-          // Handle resume/cover letter - check if it's a file input or text input
-          const fieldInfo =
-            `${field.label || ''} ${field.placeholder || ''} ${field.fieldName}`.toLowerCase();
-          const isResumeField = fieldInfo.includes('resume') || fieldInfo.includes('cv');
-          const isCoverLetterField = fieldInfo.includes('cover') && fieldInfo.includes('letter');
-
-          if (isResumeField || isCoverLetterField) {
-            const context: Frame | Page = field.frame || page;
-            const el = await context.$(field.selector);
-
-            if (el) {
-              // Check if it's a file input
-              const tagName = await el.evaluate((el: Element) => el.tagName.toLowerCase());
-              const inputType = await el.getAttribute('type');
-
-              if (tagName === 'input' && inputType === 'file') {
-                // It's a file input - upload file
-                if (isResumeField && resumePath) {
-                  try {
-                    await el.setInputFiles(resumePath);
-                    console.log(`[DEV] Uploaded resume file: "${resumePath}"`);
-                  } catch (error) {
-                    console.log(`[DEV] Error uploading resume file: ${error}`);
-                  }
-                } else if (isCoverLetterField) {
-                  // Cover letter as file - create a temporary file if needed
-                  // For now, skip file upload for cover letter (usually text)
-                  console.log(
-                    `[DEV] Cover letter field is file input, but cover letter is text - skipping`
-                  );
-                }
-              } else {
-                // It's a text input/textarea - fill with text
-                if (isCoverLetterField && coverLetter) {
-                  try {
-                    await el.fill(coverLetter);
-                    console.log(`[DEV] Filled cover letter text field`);
-                    coverLetterFilled = true;
-                  } catch (error) {
-                    console.log(`[DEV] Error filling cover letter: ${error}`);
-                  }
-                } else if (isResumeField) {
-                  // Resume field as text - might be a resume URL or text field
-                  // For now, skip (resume should be uploaded as file)
-                  console.log(
-                    `[DEV] Resume field is text input, but resume should be uploaded as file - skipping`
-                  );
-                }
-              }
-            }
-            continue;
-          }
-
-          // Default: fill text-like inputs and textareas
-          if (mappedData) {
-            const context: Frame | Page = field.frame || page;
-            const el = await context.$(field.selector);
-            if (el) {
-              // Transform value before filling
-              const transformedValue = this.transformValueForFieldType(mappedData, field);
-
-              try {
-                await el.fill(transformedValue || mappedData);
-                console.log(
-                  `[DEV] Filled field "${field.fieldName}": "${(transformedValue || mappedData).substring(0, 120)}${
-                    (transformedValue || mappedData).length > 120 ? '...' : ''
-                  }"`
-                );
-              } catch (error) {
-                // Try using JavaScript if fill fails
-                try {
-                  await el.evaluate(
-                    (element: HTMLInputElement | HTMLTextAreaElement, value: string) => {
-                      element.value = value;
-                      element.dispatchEvent(new Event('input', { bubbles: true }));
-                      element.dispatchEvent(new Event('change', { bubbles: true }));
-                    },
-                    transformedValue || mappedData
-                  );
-                  console.log(`[DEV] Filled field "${field.fieldName}" via JavaScript`);
-                } catch (jsError) {
-                  console.log(`[DEV] Error filling field "${field.fieldName}": ${jsError}`);
-                }
-              }
-            } else {
-              console.log(`[DEV] Could not find element for field: ${field.fieldName}`);
-            }
-          }
-        } catch (error) {
-          console.log(`[DEV] Error filling field "${field.fieldName}":`, error);
-        }
-      }
-
-      // Step 3.5: Fallback for cover letter if not filled via normal mapping
-      if (!coverLetterFilled && coverLetter) {
-        console.log(
-          `[DEV] Cover letter not filled via normal mapping, searching for "cover letter" keyword elements...`
-        );
-        const coverLetterFilledFallback = await this.searchAndFillCoverLetterByKeyword(
-          page,
-          coverLetter
-        );
-        if (!coverLetterFilledFallback) {
-          // Try iframes
-          const iframes = await page.$$('iframe');
-          for (let i = 0; i < iframes.length; i++) {
-            try {
-              const frame = await iframes[i].contentFrame();
-              if (frame) {
-                const frameCoverLetterFilled = await this.searchAndFillCoverLetterByKeyword(
-                  frame,
-                  coverLetter
-                );
-                if (frameCoverLetterFilled) {
-                  console.log(`[DEV] Filled cover letter via keyword search in iframe ${i}`);
-                  coverLetterFilled = true;
-                  break;
-                }
-              }
-            } catch (error) {
-              // Continue trying other iframes
-            }
-          }
-        } else {
-          coverLetterFilled = true;
-        }
-      }
-
-      // Step 3.6: Handle dynamic "Add" buttons for education/experience sections
-      console.log(`[DEV] Looking for "Add" buttons for education/experience sections...`);
-      const newFieldsAdded = await this.handleAddButtons(page);
-
-      // If new fields were added, re-parse and fill them
-      if (newFieldsAdded > 0) {
-        console.log(`[DEV] Re-parsing form after clicking ${newFieldsAdded} "Add" buttons...`);
-
-        // Re-parse fields after add button clicks
-        const newParsedFields = await this.parseFormFields(page);
-        const newFields = newParsedFields.filter(
-          (newField) =>
-            !parsedFields.some((existingField) => existingField.selector === newField.selector)
-        );
-
-        console.log(`[DEV] Found ${newFields.length} new fields after add button clicks`);
-
-        if (newFields.length > 0) {
-          // Map and fill the new fields
-          const newFieldMappings = await this.mapFieldsToData(
-            newFields,
-            userProfile,
-            coverLetter,
-            resumeText || ''
-          );
-
-          // Fill the new fields
-          for (const mapping of newFieldMappings) {
-            const { field, mappedData } = mapping;
-            try {
-              if (field.elementType === 'select') {
-                await this.selectBestOption(
-                  page,
-                  field.selector,
-                  field.options,
-                  mappedData,
-                  field.frame
-                );
-                continue;
-              }
-
-              if (field.elementType === 'input' && field.inputType === 'radio') {
-                if (field.options && field.options.length > 0) {
-                  const context: Frame | Page = field.frame || page;
-                  const name = field.fieldName;
-                  const radios = await context.$$(`input[type="radio"][name="${name}"]`);
-
-                  if (radios.length > 0) {
-                    let clicked = false;
-                    const target = (mappedData || '').toLowerCase().trim();
-
-                    // Try exact value match first
-                    for (const radio of radios) {
-                      const value = (await radio.getAttribute('value')) || '';
-                      if (value.toLowerCase() === target) {
-                        await radio.click();
-                        console.log(`[DEV] Selected new radio "${value}" for "${name}"`);
-                        clicked = true;
-                        break;
-                      }
-                    }
-
-                    // Fallback: yes/no or first option
-                    if (!clicked) {
-                      const yn = this.normalizeYesNo(mappedData);
-                      if (yn) {
-                        for (const radio of radios) {
-                          const value = (await radio.getAttribute('value')) || '';
-                          if (value.toLowerCase().includes(yn)) {
-                            await radio.click();
-                            console.log(
-                              `[DEV] Selected new radio "${value}" for "${name}" (yes/no: ${yn})`
-                            );
-                            clicked = true;
-                            break;
-                          }
-                        }
-                      }
-                    }
-
-                    if (!clicked && radios.length > 0) {
-                      await radios[0].click();
-                      console.log(`[DEV] Selected first option for new radio field "${name}"`);
-                    }
-                  }
-                }
-                continue;
-              }
-
-              // Fill text inputs and textareas
-              if (mappedData) {
-                const context: Frame | Page = field.frame || page;
-                const el = await context.$(field.selector);
-                if (el) {
-                  await el.fill(mappedData);
-                  console.log(
-                    `[DEV] Filled new field "${field.fieldName}": "${mappedData.substring(0, 50)}${
-                      mappedData.length > 50 ? '...' : ''
-                    }"`
-                  );
-                }
-              }
-            } catch (error) {
-              console.log(`[DEV] Error filling new field "${field.fieldName}":`, error);
-            }
-          }
-        }
-      }
-
-      // Step 4: Upload resume if needed
-      await this.uploadResume(page, resumePath);
-
-      // Step 5: Take screenshot before submission
-      const screenshot = await page.screenshot({ fullPage: true });
-
-      // Step 6: Keep browser open for manual verification and submission
-      console.log(`[DEV] ============================================`);
-      console.log(`[DEV] Form fields have been populated successfully!`);
-      console.log(`[DEV] Browser is open for manual verification.`);
-      console.log(`[DEV] Please review all fields and submit manually when ready.`);
-      console.log(`[DEV] ============================================`);
-
-      return {
-        success: true,
-        screenshot,
-        // Note: submittedAt will be undefined since we're not auto-submitting
-      };
-    } catch (error) {
-      console.log(`[DEV] Application filling failed: ${error}`);
-      const screenshot = await page.screenshot({ fullPage: true });
-      return {
-        success: false,
-        error: `Application failed: ${error}`,
-        screenshot,
-      };
-    }
-    // Note: Page is kept open for manual verification - no finally block to close it
-  }
-
-  private async fillField(
-    page: Page,
-    selectors: string[],
-    value: string,
-    fieldName?: string
-  ): Promise<boolean> {
-    for (const selector of selectors) {
-      try {
-        const field = await page.$(selector);
-        if (field) {
-          await field.fill(value);
-          // Dev logging - show which field was filled and what value
-          if (fieldName) {
-            console.log(`[DEV] Filled ${fieldName}: "${value}" (using selector: ${selector})`);
-          }
-          return true;
-        }
-      } catch (error) {
-        // Continue trying other selectors
-      }
-    }
-    if (fieldName) {
-      console.log(
-        `[DEV] Could not find field for ${fieldName} - tried selectors: ${selectors.join(', ')}`
-      );
-    }
-    return false;
   }
 
   private async uploadResume(page: Page, resumePath: string): Promise<boolean> {
@@ -2411,534 +1646,895 @@ export class ApplicationFiller {
       'input[id*="resume"]',
       'input[id*="cv"]',
       'input[accept*="pdf"]',
-      'input[accept*="doc"]',
-      'input[class*="file"]',
-      'input[data-testid*="resume"]',
-      'input[data-testid*="cv"]',
-      'input[aria-label*="resume"]',
-      'input[aria-label*="cv"]',
+      'input[accept*="application/pdf"]',
     ];
 
-    // Helper function to try uploading to a context (page or frame)
-    const tryUploadInContext = async (
-      context: Page | Frame,
-      contextName: string
-    ): Promise<boolean> => {
-      // First try standard selectors
-      for (const selector of fileInputSelectors) {
-        try {
-          const fileInput = await context.$(selector);
-          if (fileInput) {
-            // Check if it's visible or if we need to make it visible
-            const isVisible = await fileInput.isVisible().catch(() => false);
-            if (!isVisible) {
-              // Try to make it visible by clicking parent or triggering click
-              try {
-                await fileInput.evaluate((el: HTMLInputElement) => {
-                  el.style.display = 'block';
-                  el.style.visibility = 'visible';
-                  el.style.opacity = '1';
-                });
-              } catch (e) {
-                // Continue anyway
-              }
-            }
-
-            await fileInput.setInputFiles(resumePath);
-            console.log(
-              `[DEV] Uploaded resume: "${resumePath}" (using selector: ${selector} in ${contextName})`
-            );
-            await context.waitForTimeout(500); // Wait for upload to process
-            return true;
-          }
-        } catch (error) {
-          // Continue trying other selectors
-        }
-      }
-
-      // Try keyword-based search
-      const keywordUploaded = await this.searchAndUploadResumeByKeyword(context, resumePath);
-      if (keywordUploaded) {
-        console.log(`[DEV] Uploaded resume via keyword search in ${contextName}`);
-        await context.waitForTimeout(500);
-        return true;
-      }
-
-      return false;
-    };
-
-    // First try main document
-    const mainUploaded = await tryUploadInContext(page, 'main document');
-    if (mainUploaded) {
-      return true;
-    }
-
-    // Try iframes recursively
-    const iframes = await page.$$('iframe');
-    for (let i = 0; i < iframes.length; i++) {
-      try {
-        const frame = await iframes[i].contentFrame();
-        if (frame) {
-          const frameUploaded = await tryUploadInContext(frame, `iframe ${i}`);
-          if (frameUploaded) {
-            return true;
-          }
-        }
-      } catch (error) {
-        // Continue trying other iframes
-      }
-    }
-
-    // Final attempt: Try clicking on any upload button/area and then uploading
-    console.log(`[DEV] Standard methods failed, trying click-then-upload approach...`);
-    try {
-      const uploadButtons = await page.$$(
-        'button[class*="upload"], button[class*="resume"], button[class*="cv"], [role="button"][class*="upload"], [class*="file-upload"], [class*="dropzone"]'
-      );
-
-      for (const button of uploadButtons.slice(0, 3)) {
-        try {
-          const buttonText = await button.textContent();
-          const buttonClass = (await button.getAttribute('class')) || '';
-          const combined = `${buttonText} ${buttonClass}`.toLowerCase();
-
-          if (
-            combined.includes('resume') ||
-            combined.includes('cv') ||
-            combined.includes('upload') ||
-            combined.includes('file')
-          ) {
-            console.log(`[DEV] Clicking upload button: "${buttonText?.trim()}"`);
-            await button.click();
-            await page.waitForTimeout(1000);
-
-            // After clicking, try to find and upload file input
-            const fileInput = await page.$('input[type="file"]');
-            if (fileInput) {
-              await fileInput.setInputFiles(resumePath);
-              console.log(`[DEV] Uploaded resume after clicking upload button`);
-              await page.waitForTimeout(500);
-              return true;
-            }
-          }
-        } catch (error) {
-          // Continue
-        }
-      }
-    } catch (error) {
-      // Ignore
-    }
-
-    console.log(
-      `[DEV] Could not find resume upload field - tried all methods including selectors, keyword search, and click-then-upload`
-    );
-    return false;
-  }
-
-  private async searchAndUploadResumeByKeyword(
-    context: Page | Frame,
-    resumePath: string
-  ): Promise<boolean> {
-    try {
-      // Find all clickable elements that might contain "resume" text
-      const resumeElements = await context.$$(
-        '[class*="resume"], [class*="cv"], button, a, div, span, label'
-      );
-
-      for (const element of resumeElements) {
-        try {
-          const textContent = (await element.textContent())?.toLowerCase() || '';
-          const className = (await element.getAttribute('class'))?.toLowerCase() || '';
-          const id = (await element.getAttribute('id'))?.toLowerCase() || '';
-          const ariaLabel = (await element.getAttribute('aria-label'))?.toLowerCase() || '';
-
-          const combinedText = `${textContent} ${className} ${id} ${ariaLabel}`;
-
-          if (
-            combinedText.includes('resume') ||
-            combinedText.includes('cv') ||
-            (combinedText.includes('upload') &&
-              (combinedText.includes('file') || combinedText.includes('document')))
-          ) {
-            console.log(`[DEV] Found potential resume element with text: "${textContent.trim()}"`);
-
-            // Check if this element is actually a file input (might be hidden)
-            const tagName = await element.evaluate((el) => el.tagName.toLowerCase());
-            if (tagName === 'input') {
-              const inputType = await element.getAttribute('type');
-              if (inputType === 'file') {
-                await element.setInputFiles(resumePath);
-                console.log(`[DEV] Uploaded resume via hidden file input found by keyword search`);
-                return true;
-              }
-            }
-
-            // Skip clicking elements as it may navigate to different pages
-            console.log(`[DEV] Skipping click for resume element to avoid navigation`);
-          }
-        } catch (error) {
-          // Continue trying other elements
-        }
-      }
-    } catch (error) {
-      console.log(`[DEV] Error during keyword search for resume upload:`, error);
-    }
-
-    return false;
-  }
-
-  private async searchAndFillCoverLetterByKeyword(
-    context: Page | Frame,
-    coverLetter: string
-  ): Promise<boolean> {
-    try {
-      // Find all text input/textarea elements that might be for cover letters
-      const textElements = await context.$$(
-        'textarea, input[type="text"], div[contenteditable="true"], div[role="textbox"]'
-      );
-
-      for (const element of textElements) {
-        try {
-          const textContent = (await element.textContent())?.toLowerCase() || '';
-          const placeholder = (await element.getAttribute('placeholder'))?.toLowerCase() || '';
-          const ariaLabel = (await element.getAttribute('aria-label'))?.toLowerCase() || '';
-          const id = (await element.getAttribute('id'))?.toLowerCase() || '';
-          const name = (await element.getAttribute('name'))?.toLowerCase() || '';
-          const className = (await element.getAttribute('class'))?.toLowerCase() || '';
-
-          const combinedText = `${textContent} ${placeholder} ${ariaLabel} ${id} ${name} ${className}`;
-
-          if (combinedText.includes('cover') && combinedText.includes('letter')) {
-            console.log(
-              `[DEV] Found potential cover letter element with text: "${placeholder || textContent}"`
-            );
-
-            // Try to fill the element
-            try {
-              await element.fill(coverLetter);
-              console.log(
-                `[DEV] Filled cover letter via keyword search: "${coverLetter.substring(0, 120)}..."`
-              );
-              return true;
-            } catch (fillError) {
-              // Try clicking first then filling
-              try {
-                await element.click();
-                await context.waitForTimeout(500);
-                await element.fill(coverLetter);
-                console.log(
-                  `[DEV] Filled cover letter after click via keyword search: "${coverLetter.substring(0, 120)}..."`
-                );
-                return true;
-              } catch (clickFillError) {
-                console.log(`[DEV] Could not fill cover letter element found by keyword search`);
-              }
-            }
-          }
-        } catch (error) {
-          // Continue trying other elements
-        }
-      }
-
-      // Also search for labels or other elements that might indicate cover letter fields
-      const labelElements = await context.$$('label, span, div, p');
-
-      for (const element of labelElements) {
-        try {
-          const textContent = (await element.textContent())?.toLowerCase() || '';
-          const combinedText = textContent;
-
-          if (combinedText.includes('cover') && combinedText.includes('letter')) {
-            console.log(`[DEV] Found cover letter label: "${textContent}"`);
-
-            // Try to find associated input/textarea
-            const elementId =
-              (await element.getAttribute('for')) || (await element.getAttribute('id'));
-
-            if (elementId) {
-              // Look for input/textarea with matching id
-              const associatedElement = await context.$(`#${elementId}`);
-              if (associatedElement) {
-                const tagName = await associatedElement.evaluate((el) => el.tagName.toLowerCase());
-                if (['textarea', 'input', 'div'].includes(tagName)) {
-                  try {
-                    await associatedElement.fill(coverLetter);
-                    console.log(
-                      `[DEV] Filled cover letter via associated element: "${coverLetter.substring(0, 120)}..."`
-                    );
-                    return true;
-                  } catch (fillError) {
-                    console.log(`[DEV] Could not fill associated cover letter element`);
-                  }
-                }
-              }
-            }
-
-            // Try finding next sibling input/textarea
-            const nextInput = await element.$(
-              'xpath=following::textarea[1] | following::input[1] | following::div[@contenteditable="true"][1]'
-            );
-            if (nextInput) {
-              try {
-                await nextInput.fill(coverLetter);
-                console.log(
-                  `[DEV] Filled cover letter via sibling element: "${coverLetter.substring(0, 120)}..."`
-                );
-                return true;
-              } catch (fillError) {
-                console.log(`[DEV] Could not fill sibling cover letter element`);
-              }
-            }
-          }
-        } catch (error) {
-          // Continue trying other elements
-        }
-      }
-    } catch (error) {
-      console.log(`[DEV] Error during keyword search for cover letter:`, error);
-    }
-
-    return false;
-  }
-
-  private async handleAddButtons(page: Page): Promise<number> {
-    let buttonsClicked = 0;
-    try {
-      // Look for "Add" buttons related to education, experience, work, etc.
-      const addButtonSelectors = [
-        'button',
-        'a',
-        'input[type="button"]',
-        'input[type="submit"]',
-        'div[role="button"]',
-        'span[role="button"]',
-        '[class*="add"]',
-        '[class*="plus"]',
-        '[class*="btn"]',
-      ];
-
-      const addButtons: Array<{ element: any; text: string; score: number }> = [];
-
-      for (const selector of addButtonSelectors) {
-        const elements = await page.$$(selector);
+    for (const selector of fileInputSelectors) {
+      const elements = await page.$$(selector);
+      if (elements.length > 0) {
+        console.log(`[DEV] Found file input(s) with selector ${selector}, uploading resume...`);
         for (const element of elements) {
           try {
-            const textContent = (await element.textContent())?.toLowerCase() || '';
-            const ariaLabel = (await element.getAttribute('aria-label'))?.toLowerCase() || '';
-            const title = (await element.getAttribute('title'))?.toLowerCase() || '';
-            const className = (await element.getAttribute('class'))?.toLowerCase() || '';
-
-            const combinedText = `${textContent} ${ariaLabel} ${title} ${className}`;
-
-            // Keywords that indicate this is an "add" button for sections
-            const addKeywords = ['add', 'plus', '+', 'new', 'another', 'more', 'additional'];
-            const sectionKeywords = [
-              'education',
-              'experience',
-              'work',
-              'employment',
-              'job',
-              'position',
-              'school',
-              'university',
-              'degree',
-              'certification',
-              'skill',
-              'project',
-            ];
-
-            let score = 0;
-
-            // Check for add keywords
-            const hasAddKeyword = addKeywords.some((keyword) => combinedText.includes(keyword));
-            if (hasAddKeyword) score += 5;
-
-            // Check for section keywords
-            const hasSectionKeyword = sectionKeywords.some((keyword) =>
-              combinedText.includes(keyword)
-            );
-            if (hasSectionKeyword) score += 5;
-
-            // Bonus for exact matches
-            if (
-              combinedText.includes('add education') ||
-              combinedText.includes('add experience') ||
-              combinedText.includes('add work') ||
-              combinedText.includes('add job')
-            ) {
-              score += 10;
-            }
-
-            // Look for plus icons or symbols
-            if (
-              combinedText.includes('+') ||
-              className.includes('plus') ||
-              className.includes('add')
-            ) {
-              score += 3;
-            }
-
-            if (score >= 5) {
-              addButtons.push({
-                element,
-                text: textContent.trim() || ariaLabel || title || 'button',
-                score,
-              });
-            }
+            await element.setInputFiles(resumePath);
+            console.log('[DEV] Resume uploaded successfully.');
+            return true;
           } catch (error) {
-            // Continue to next element
+            console.log('[DEV] Error uploading resume to one of the inputs:', error);
           }
         }
       }
+    }
 
-      // Sort by score (highest first)
-      addButtons.sort((a, b) => b.score - a.score);
+    // If not found on main page, search in frames
+    const frames = await this.getAllFrames(page);
+    for (const frame of frames) {
+      for (const selector of fileInputSelectors) {
+        const elements = await frame.$$(selector);
+        if (elements.length > 0) {
+          console.log(
+            `[DEV] Found file input(s) with selector ${selector} in frame ${frame.name() || frame.url()}, uploading resume...`
+          );
+          for (const element of elements) {
+            try {
+              await element.setInputFiles(resumePath);
+              console.log('[DEV] Resume uploaded successfully in frame.');
+              return true;
+            } catch (error) {
+              console.log('[DEV] Error uploading resume to one of the inputs in frame:', error);
+            }
+          }
+        }
+      }
+    }
 
-      console.log(`[DEV] Found ${addButtons.length} potential "Add" buttons (sorted by relevance)`);
-      for (const button of addButtons.slice(0, 5)) {
-        console.log(`[DEV]   - Score ${button.score}: "${button.text}"`);
+    console.log('[DEV] No suitable resume upload field found.');
+    return false;
+  }
+
+  private async generateAnswersForAIFields(
+    mappings: FieldMapping[],
+    resumeText: string
+  ): Promise<FieldMapping[]> {
+    const aiMappings = mappings.filter((m) => m.needsAI && m.aiPrompt);
+
+    if (aiMappings.length === 0) return mappings;
+
+    // Resume is sent once as system context; each question is asked individually.
+    // This keeps each call well within the context window and avoids JSON parsing fragility.
+    const systemPrompt = `Candidate resume:\n${resumeText}`;
+
+    console.log(`[AI] Answering ${aiMappings.length} field questions sequentially`);
+
+    for (const mapping of aiMappings) {
+      const label = mapping.field.label || mapping.field.fieldName;
+      try {
+        // Extract the question text from the embedded prompt, or fall back to field metadata
+        const prompt = mapping.aiPrompt!;
+        const questionMatch = prompt.match(/Question:\s*([\s\S]+?)(?:\nResume:|\nCandidate resume:|$)/);
+        const question =
+          questionMatch?.[1].trim() ||
+          mapping.field.questionText ||
+          mapping.field.label ||
+          mapping.field.placeholder ||
+          mapping.field.fieldName;
+
+        console.log(`[AI] Asking: "${question.slice(0, 80)}"`);
+
+        // Use more tokens for summary/about fields which need 3-4 sentences
+        const semanticType = this.getFieldSemanticType(mapping.field);
+        const maxTokens = semanticType === 'summary' ? 300 : 150;
+        const answer = await generateText(systemPrompt, question, maxTokens);
+
+        if (answer?.trim()) {
+          mapping.mappedData = answer.trim();
+          console.log(`[AI] "${label}" → "${answer.trim().slice(0, 80)}"`);
+        } else {
+          console.log(`[AI] Empty answer for "${label}"`);
+        }
+      } catch (err) {
+        console.log(`[AI] Failed for "${label}":`, err);
+      }
+    }
+
+    return mappings;
+  }
+
+  /**
+   * After the main fill pass, check each mapped field's actual DOM value.
+   * Any field that is still empty/unchanged gets re-queued for another fill attempt.
+   */
+  private async recheckAndRefillEmpty(page: Page, mappings: FieldMapping[]): Promise<void> {
+    const stillEmpty: FieldMapping[] = [];
+
+    for (const mapping of mappings) {
+      if (!mapping.mappedData) continue;
+      const field = mapping.field;
+      if (!field.frame) continue;
+
+      try {
+        const frame = field.frame as Frame;
+        const selectorClean = field.selector.split('||')[0];
+        const el = await frame.$(selectorClean);
+        if (!el) continue;
+
+        const currentValue = await el.evaluate((e: HTMLElement) => {
+          if (
+            e instanceof HTMLInputElement ||
+            e instanceof HTMLTextAreaElement ||
+            e instanceof HTMLSelectElement
+          ) {
+            return e.value;
+          }
+          return (e as HTMLElement).innerText || e.textContent || '';
+        });
+
+        if (!currentValue || currentValue.trim() === '') {
+          console.log(
+            `[Recheck] "${field.label || field.fieldName}" is still empty — will retry.`
+          );
+          stillEmpty.push(mapping);
+        }
+      } catch {
+        // ignore individual errors
+      }
+    }
+
+    if (stillEmpty.length > 0) {
+      console.log(`[Recheck] Retrying ${stillEmpty.length} still-empty field(s)...`);
+      await this.fieldFiller.fillAll(stillEmpty, page);
+    } else {
+      console.log('[Recheck] All mapped fields appear to have values.');
+    }
+  }
+
+  private async submitForm(page: Page): Promise<boolean> {
+    const submitSelectors = [
+      'button[type="submit"]',
+      'input[type="submit"]',
+      'button:has-text("Submit")',
+      'button:has-text("Apply")',
+      'button:has-text("Apply Now")',
+      'button:has-text("Next")',
+      'button:has-text("Continue")',
+      'button[aria-label*="submit"]',
+      'button[aria-label*="apply"]',
+    ];
+
+    for (const selector of submitSelectors) {
+      const button = await page.$(selector);
+      if (button) {
+        console.log(`[DEV] Clicking submit button: ${selector}`);
+        await button.click();
+        await page.waitForTimeout(3000); // Wait for submission to process
+        return true;
+      }
+    }
+
+    console.log('[DEV] No submit button found.');
+    return false;
+  }
+
+  /**
+   * Fills the form using AI-extracted fields.
+   * The AI has already determined selectors and answers — Playwright just executes fills.
+   *
+   * Handles:
+   *  - text / textarea: direct fill
+   *  - select: native selectOption by label, with JS fallback for custom dropdowns
+   *  - radio: check the matching option by label
+   *  - checkbox: check/uncheck based on truthy answer
+   *  - file: setInputFiles with the resume path (when answer === "RESUME_FILE")
+   */
+  /**
+   * Generic entry-filling for experience/education (and any repeating section).
+   *
+   * Instead of hardcoding platform-specific selectors, this uses a DOM snapshot diff:
+   *   1. Mark all existing controls with data-snap before clicking Add
+   *   2. Click the Add button (found by aria-label / button text)
+   *   3. Extract field info only from controls that appeared after the snapshot
+   *   4. Let AI answer those fields with entry-specific context
+   *   5. Find the save/confirm button by locating the common ancestor of the new
+   *      controls, then picking the first positive-action button inside it
+   *   6. Click save, repeat for the next entry
+   *
+   * Works across Workable, Greenhouse, Lever, SmartRecruiters, etc. without
+   * any platform-specific selectors.
+   *
+   * After all entries are filled, re-fills the profile summary (React re-renders
+   * during saves can clear controlled textareas).
+   */
+  private async fillStructuredEntries(
+    page: Page,
+    formFrame: Frame,
+    structuredResume: StructuredResume,
+    profileSummaryValue: string,
+    resumePath: string
+  ): Promise<void> {
+    const CONTROL_SEL =
+      'input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="reset"]),' +
+      'textarea,select';
+
+    // ── Mark all existing controls so we can diff after Add click ────────────────
+    const snapshotControls = () =>
+      formFrame.evaluate((sel: string) => {
+        document.querySelectorAll<HTMLElement>(sel)
+          .forEach(el => { el.dataset.snap = '1'; });
+      }, CONTROL_SEL);
+
+    // ── Build form-field XML only for controls that appeared after snapshot ───────
+    // (same logic as HtmlFormExtractorAgent.getFormHTML, scoped to new elements)
+    const extractNewFieldsHTML = (): Promise<string> =>
+      formFrame.evaluate((sel: string) => {
+        const isVisible = (el: HTMLElement) => {
+          if (el.hasAttribute('hidden') || el.getAttribute('aria-hidden') === 'true') return false;
+          const s = window.getComputedStyle(el);
+          if (s.display === 'none' || s.visibility === 'hidden') return false;
+          const r = el.getBoundingClientRect();
+          return r.width > 0 && r.height > 0;
+        };
+
+        const getLabel = (el: HTMLElement): string => {
+          const aria = el.getAttribute('aria-label');
+          if (aria?.trim()) return aria.trim();
+          const lby = el.getAttribute('aria-labelledby');
+          if (lby) {
+            const t = lby.split(' ')
+              .map(id => document.getElementById(id)?.textContent?.trim() || '')
+              .filter(Boolean).join(' ');
+            if (t) return t;
+          }
+          const id = (el as HTMLInputElement).id;
+          if (id) {
+            const lbl = document.querySelector(`label[for="${id}"]`);
+            const t = lbl ? (lbl.textContent || '').replace(/[*]/g, '').trim() : '';
+            if (t) return t;
+          }
+          // Placeholder
+          const ph = (el as HTMLInputElement).placeholder?.trim();
+          if (ph) return ph;
+          // Name → readable label (phone → "Phone", start_date → "Start Date")
+          const name = (el as HTMLInputElement).name || '';
+          if (name && /^[a-z][a-z0-9_]*$/.test(name))
+            return name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+          // Nearby label as last resort
+          const grp = el.closest('[class*="field"],[class*="form"],[class*="row"],[class*="group"],li');
+          if (grp) {
+            const lbl = grp.querySelector('label,legend');
+            const t = lbl ? (lbl.textContent || '').replace(/[*]/g, '').trim() : '';
+            if (t) return t;
+          }
+          return '';
+        };
+
+        const makeSelector = (el: HTMLElement): string => {
+          const tag = el.tagName.toLowerCase();
+          const id = (el as HTMLInputElement).id;
+          const name = (el as HTMLInputElement).name;
+          const aria = el.getAttribute('aria-label');
+          const ph = (el as HTMLInputElement).placeholder;
+          const idx = el.dataset.autofillIdx;
+          if (id) return `${tag}[id='${id}']`;
+          if (name) return `${tag}[name='${name}']`;  // name alone is unambiguous
+          if (aria) return `${tag}[aria-label='${aria}']`;
+          if (ph) return `${tag}[placeholder='${ph}']`;
+          return idx ? `${tag}[data-autofill-idx='${idx}']` : tag;
+        };
+
+        // Assign autofill-idx only to new (no data-snap) controls, above current max
+        let maxIdx = -1;
+        document.querySelectorAll<HTMLElement>('[data-autofill-idx]').forEach(el => {
+          const v = parseInt(el.dataset.autofillIdx || '-1');
+          if (v > maxIdx) maxIdx = v;
+        });
+        const newEls = Array.from(document.querySelectorAll<HTMLElement>(sel))
+          .filter(el => !el.dataset.snap);
+        newEls.forEach(el => {
+          if (!el.dataset.autofillIdx) el.dataset.autofillIdx = String(++maxIdx);
+        });
+
+        const DATE_NAME_LABELS: Record<string, string> = {
+          start_date: 'Start Date', end_date: 'End Date',
+          from_date: 'From Date', to_date: 'To Date',
+        };
+        const seenRadios = new Set<string>();
+        const lines = ['<form-fields>'];
+
+        for (const el of newEls) {
+          if (!isVisible(el)) continue;
+          const tag = el.tagName.toLowerCase();
+          const inputType = (el as HTMLInputElement).type || 'text';
+          const name = (el as HTMLInputElement).name || '';
+          if (inputType === 'radio') {
+            if (seenRadios.has(name)) continue;
+            seenRadios.add(name);
+          }
+          const selector = makeSelector(el);
+          const rawLabel = getLabel(el);
+          const label = DATE_NAME_LABELS[name] || rawLabel;
+          const required = (el as HTMLInputElement).required ||
+            el.getAttribute('aria-required') === 'true';
+          const ph = (el as HTMLInputElement).placeholder?.trim() || '';
+          const maxLen = (el as HTMLTextAreaElement).maxLength > 0
+            ? (el as HTMLTextAreaElement).maxLength : null;
+          let type = 'text';
+          if (tag === 'textarea') type = 'textarea';
+          else if (tag === 'select') type = 'select';
+          else if (inputType === 'radio') type = 'radio';
+          else if (inputType === 'checkbox') type = 'checkbox';
+          else if (inputType === 'file') type = 'file';
+
+          lines.push(`  <field type="${type}" selector="${selector}" required="${required}"` +
+            `${ph ? ` placeholder="${ph}"` : ''}${maxLen ? ` maxlength="${maxLen}"` : ''}>`);
+          lines.push(`    <label>${label}</label>`);
+
+          if (tag === 'select') {
+            const opts = Array.from((el as HTMLSelectElement).options)
+              .map(o => o.text.trim()).filter(t => t && !/^(select|choose|--)/i.test(t));
+            if (opts.length) lines.push(`    <options>${opts.join(', ')}</options>`);
+          }
+          if (inputType === 'radio' && name) {
+            const radios = document.querySelectorAll<HTMLInputElement>(`input[type="radio"][name="${name}"]`);
+            const opts: string[] = [];
+            radios.forEach(r => {
+              const lbl = r.id ? document.querySelector(`label[for="${r.id}"]`)?.textContent?.trim() : '';
+              if (lbl || r.value) opts.push(lbl || r.value);
+            });
+            if (opts.length) lines.push(`    <options>${opts.join(', ')}</options>`);
+          }
+          lines.push('  </field>');
+        }
+        lines.push('</form-fields>');
+        return lines.join('\n');
+      }, CONTROL_SEL);
+
+    // ── Find an "Add" button by aria-label / visible text ────────────────────────
+    const findAddButton = async (keywords: string[]) => {
+      for (const kw of keywords) {
+        const re = new RegExp(kw, 'i');
+        // getByRole checks accessible name (aria-label takes priority over text content)
+        const byRole = formFrame.getByRole('button', { name: re });
+        if (await byRole.count() > 0) return byRole.first();
+        // Fallback: iterate elements with aria-label and check programmatically
+        const handles = await formFrame.locator('[aria-label]').all();
+        for (const handle of handles) {
+          const label = await handle.getAttribute('aria-label');
+          if (label && re.test(label)) return handle;
+        }
+        // Last resort: visible text content
+        const byText = formFrame.locator('button,[role="button"]').filter({ hasText: re });
+        if (await byText.count() > 0) return byText.first();
+      }
+      return null;
+    };
+
+    // ── Find the save/confirm button by reading the DOM ───────────────────────────
+    // Locates the common ancestor of newly added form controls, then picks the first
+    // visible button inside that ancestor whose text is NOT a negative action
+    // (Cancel, Clear, Delete, Remove, Discard, Close).
+    const findSaveButton = async (): Promise<string | null> =>
+      formFrame.evaluate((sel: string) => {
+        const NEGATIVE = /^(cancel|clear|delete|remove|discard|close|reset|back)$/i;
+
+        const newControls = Array.from(document.querySelectorAll<HTMLElement>(sel))
+          .filter(el => !el.dataset.snap);
+        if (!newControls.length) return null;
+
+        // Walk up from the first new control to find a common ancestor that also
+        // contains a button
+        let ancestor: Element | null = newControls[0];
+        while (ancestor) {
+          const buttons = Array.from(ancestor.querySelectorAll<HTMLElement>('button,[role="button"]'))
+            .filter(btn => {
+              if (btn.hasAttribute('hidden')) return false;
+              const s = window.getComputedStyle(btn);
+              if (s.display === 'none' || s.visibility === 'hidden') return false;
+              const r = btn.getBoundingClientRect();
+              if (r.width === 0 || r.height === 0) return false;
+              const text = (btn.textContent || '').trim();
+              return text && !NEGATIVE.test(text);
+            });
+          if (buttons.length > 0) {
+            const btn = buttons[0];
+            // Build a unique-enough selector to click later
+            if (btn.id) return `#${btn.id}`;
+            const dataUi = btn.getAttribute('data-ui');
+            if (dataUi) return `[data-ui="${dataUi}"]`;
+            const ariaLabel = btn.getAttribute('aria-label');
+            if (ariaLabel) return `[aria-label="${ariaLabel}"]`;
+            // Use text content as last resort via nth-match
+            const text = (btn.textContent || '').trim();
+            return `button:has-text("${text}")`;
+          }
+          ancestor = ancestor.parentElement;
+        }
+        return null;
+      }, CONTROL_SEL);
+
+    // ── Section definitions (generic — no platform selectors) ────────────────────
+    const sections = [
+      {
+        label: 'experience',
+        addKeywords: ['add experience', 'add work experience', 'add job', 'add employment'],
+        entries: (structuredResume.experience || []).map(e => ({
+          context:
+            `Job Title / Role: ${e.role || ''}\n` +
+            `Company: ${e.company || ''}\n` +
+            `Start Date: ${e.startDate || ''}\n` +
+            `End Date: ${e.endDate || 'Present'}\n` +
+            `Description: ${e.description || (e.achievements || []).join(' ')}`,
+          display: `${e.role} @ ${e.company}`,
+        })),
+      },
+      {
+        label: 'education',
+        addKeywords: ['add education', 'add school', 'add degree', 'add qualification'],
+        entries: ((structuredResume.education || []) as any[]).map((e: any) => ({
+          context:
+            `School / Institution: ${e.school || e.institution || ''}\n` +
+            `Degree: ${e.degree || ''}\n` +
+            `Field of Study: ${e.field || e.fieldOfStudy || ''}\n` +
+            `Start Date: ${e.startDate || ''}\n` +
+            `End Date: ${e.endDate || ''}`,
+          display: `${e.degree || e.school || e.institution}`,
+        })),
+      },
+    ];
+
+    for (const section of sections) {
+      if (!section.entries.length) continue;
+
+      const addBtn = await findAddButton(section.addKeywords);
+      if (!addBtn) {
+        console.log(`[StructuredEntries] No "${section.label}" add button found — skipping`);
+        continue;
       }
 
-      // Click the top-scoring buttons to add sections
-      const maxButtonsToClick = 3; // Limit to avoid clicking too many
-
-      for (const button of addButtons) {
-        if (buttonsClicked >= maxButtonsToClick) break;
-
+      for (const entry of section.entries) {
         try {
-          // Check if this button/link will navigate to a different page
-          const willNavigate = await this.checkIfElementWillNavigate(button.element, page.url());
-          if (willNavigate) {
-            console.log(
-              `[DEV] Skipping "Add" button "${button.text}" - it will navigate to a different page`
-            );
+          // 1. Snapshot — mark all current controls so we can find new ones after click
+          await snapshotControls();
+
+          // 2. Click Add
+          await addBtn.waitFor({ state: 'visible', timeout: 5000 });
+          await addBtn.click({ timeout: 10000 });
+          await page.waitForTimeout(800);
+
+          // 3. Extract new field XML (only controls without data-snap)
+          const newFieldsHTML = await extractNewFieldsHTML();
+          const fieldCount = (newFieldsHTML.match(/<field /g) || []).length;
+          if (fieldCount === 0) {
+            console.log(`[StructuredEntries] No new fields found for "${entry.display}" — skipping`);
             continue;
           }
+          console.log(`[StructuredEntries] ${fieldCount} new fields for "${entry.display}"`);
 
-          console.log(`[DEV] Clicking "Add" button: "${button.text}" (score: ${button.score})`);
-          await button.element.click();
+          // 4. AI extracts schema + answers with entry-specific context
+          const answered = await this.htmlExtractor.extractAndAnswerFields(
+            newFieldsHTML, entry.context, { coverLetterText: undefined }
+          );
 
-          // Wait for the new fields to appear
-          await page.waitForTimeout(1500);
+          // 5. Fill
+          await this.fillFromAIFields(page, answered, resumePath);
 
-          buttonsClicked++;
-          console.log(`[DEV] Successfully clicked "Add" button, waiting for fields to appear`);
-        } catch (clickError) {
-          console.log(`[DEV] Failed to click "Add" button "${button.text}": ${clickError}`);
+          // 6. Find and click the save button by reading DOM structure
+          const saveSel = await findSaveButton();
+          if (saveSel) {
+            await formFrame.locator(saveSel).first().click({ timeout: 5000 }).catch(() => {});
+            await page.waitForTimeout(600);
+            console.log(`[StructuredEntries] Saved "${entry.display}" via "${saveSel}"`);
+          } else {
+            console.log(`[StructuredEntries] No save button found for "${entry.display}"`);
+          }
+        } catch (err: any) {
+          console.log(`[StructuredEntries] Error on "${entry.display}":`, err?.message || err);
         }
       }
-
-      // If we clicked any buttons, wait a bit more for all dynamic content to load
-      if (buttonsClicked > 0) {
-        await page.waitForTimeout(2000);
-        console.log(
-          `[DEV] Clicked ${buttonsClicked} "Add" buttons, waiting for dynamic content to load`
-        );
-      }
-    } catch (error) {
-      console.log(`[DEV] Error handling add buttons: ${error}`);
     }
 
-    return buttonsClicked;
+    // ── Re-fill profile summary ─────────────────────────────────────────────────
+    // After all saves, React may have cleared the profile summary textarea.
+    // Find it via data-snap (it was present before any Add click) and its label.
+    if (profileSummaryValue) {
+      const refilled = await formFrame.evaluate((val: string) => {
+        const all = Array.from(document.querySelectorAll<HTMLTextAreaElement>('textarea'));
+        // Profile summary was visible before the first Add click → has data-snap
+        const ta = all.find(el => {
+          if (!el.dataset.snap) return false;
+          const label =
+            (el.id ? (document.querySelector(`label[for="${el.id}"]`)?.textContent || '') : '') ||
+            el.getAttribute('aria-label') || el.name || '';
+          return /summary|bio|professional.?profile/i.test(label);
+        });
+        if (!ta) return false;
+        const setter = Object.getOwnPropertyDescriptor(
+          window.HTMLTextAreaElement.prototype, 'value'
+        )?.set;
+        if (setter) setter.call(ta, val); else ta.value = val;
+        ta.dispatchEvent(new Event('input', { bubbles: true }));
+        ta.dispatchEvent(new Event('change', { bubbles: true }));
+        return true;
+      }, profileSummaryValue);
+      console.log(refilled
+        ? '[StructuredEntries] Re-filled profile summary'
+        : '[StructuredEntries] Profile summary not found for re-fill');
+    }
   }
 
-  private async checkIfElementWillNavigate(element: any, currentUrl: string): Promise<boolean> {
-    try {
-      // Check if it's a link element
-      const tagName = await element.evaluate((el: Element) => el.tagName.toLowerCase());
-      const href = await element.getAttribute('href');
-      const target = await element.getAttribute('target');
-      const onclick = await element.getAttribute('onclick');
+  private async fillFromAIFields(
+    page: Page,
+    fields: AIField[],
+    resumePath: string,
+    coverLetterPdfPath?: string
+  ): Promise<{ filled: number; failed: number }> {
+    let filled = 0;
+    let failed = 0;
 
-      // If it's a link with href
-      if (tagName === 'a' && href) {
-        // Skip if href is just # or empty
-        if (href === '#' || href === '' || href.startsWith('javascript:void')) {
-          return false;
-        }
+    for (const field of fields) {
+      const label = field.label || field.selector;
+      try {
+        // Try main page first, then all descendant frames (recursive — handles ATSes embedded deep)
+        const frames = [page.mainFrame(), ...(await this.getAllFrames(page))];
+        let handled = false;
 
-        // Check if it opens in new tab/window
-        if (target === '_blank' || target === '_new') {
-          return true;
-        }
+        for (const frame of frames) {
+          const el = await frame.$(field.selector.split('||')[0]).catch(() => null);
+          if (!el) continue;
 
-        // Check if href is an absolute URL (different domain)
-        if (href.startsWith('http://') || href.startsWith('https://')) {
-          const currentDomain = new URL(currentUrl).hostname;
-          const hrefDomain = new URL(href).hostname;
-          if (currentDomain !== hrefDomain) {
-            return true;
+          if (field.answer === 'COVER_LETTER_FILE') {
+            if (coverLetterPdfPath) {
+              await el.setInputFiles(coverLetterPdfPath);
+              console.log(`[AIFill] cover letter PDF "${label}" → ${coverLetterPdfPath}`);
+            } else {
+              console.log(`[AIFill] cover letter file "${label}" — no PDF available, skipping`);
+            }
+            handled = true;
+          } else if (field.type === 'file' || field.answer === 'RESUME_FILE') {
+            await el.setInputFiles(resumePath);
+            console.log(`[AIFill] file "${label}" → ${resumePath}`);
+            handled = true;
+
+          } else if (field.type === 'text' || field.type === 'textarea') {
+            // Check if element is editable — if not, it may be a combobox trigger
+            const isEditable = await el.evaluate((e: HTMLElement) => {
+              const tag = e.tagName.toLowerCase();
+              if (tag === 'textarea') return true;
+              const input = e as HTMLInputElement;
+              if (input.readOnly || input.disabled) return false;
+              if (input.getAttribute('aria-readonly') === 'true') return false;
+              if (input.getAttribute('role') === 'combobox') return false;
+              if (input.getAttribute('aria-haspopup')) return false;
+              return true;
+            });
+
+            if (isEditable) {
+              // Date-like fields: fill then Tab to dismiss any calendar popup
+              const isDateField =
+                /date|month|year/i.test(field.label) ||
+                /^\d{1,2}\/\d{4}$/.test(field.answer) ||
+                field.placeholder === 'MM/YYYY';
+
+              // Use React-compatible native value setter so controlled components
+              // (like Workable's summary textarea) retain their value after re-renders
+              await el.evaluate((elem: HTMLElement, val: string) => {
+                const input = elem as HTMLInputElement | HTMLTextAreaElement;
+                const proto = input.tagName === 'TEXTAREA'
+                  ? window.HTMLTextAreaElement.prototype
+                  : window.HTMLInputElement.prototype;
+                const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+                if (setter) setter.call(input, val);
+                else input.value = val;
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                input.dispatchEvent(new Event('change', { bubbles: true }));
+              }, field.answer);
+
+              if (isDateField) {
+                await page.keyboard.press('Tab');
+                await page.waitForTimeout(300);
+              }
+              console.log(`[AIFill] ${field.type} "${label}" → "${field.answer.slice(0, 60)}"`);
+              handled = true;
+            } else {
+              // Non-editable input — treat as combobox: click to open, pick matching option
+              const mapping: FieldMapping = {
+                field: {
+                  selector: field.selector,
+                  elementType: 'input',
+                  inputType: 'text',
+                  isCombobox: true,
+                  fieldName: field.selector,
+                  label: field.label,
+                  required: field.required,
+                  frame,
+                  options: (field.options || []).map(o => ({ value: o, text: o })),
+                },
+                mappedData: field.answer,
+                needsAI: false,
+              };
+              const attempt = await this.fieldFiller.fill(mapping, page);
+              if (attempt.success) {
+                console.log(`[AIFill] combobox "${label}" → "${field.answer}"`);
+                handled = true;
+              } else {
+                console.log(`[AIFill] combobox "${label}" failed: ${attempt.error}`);
+              }
+            }
+
+          } else if (field.type === 'select') {
+            // Reuse existing fillSelect logic from FieldFillerAgent via a simulated FieldMapping
+            const mapping: FieldMapping = {
+              field: {
+                selector: field.selector,
+                elementType: 'select',
+                fieldName: field.selector,
+                label: field.label,
+                required: field.required,
+                frame,
+                options: (field.options || []).map(o => ({ value: o, text: o })),
+              },
+              mappedData: field.answer,
+              needsAI: false,
+            };
+            const attempt = await this.fieldFiller.fill(mapping, page);
+            if (attempt.success) {
+              console.log(`[AIFill] select "${label}" → "${field.answer}"`);
+              handled = true;
+            } else {
+              console.log(`[AIFill] select "${label}" failed: ${attempt.error}`);
+            }
+
+          } else if (field.type === 'radio') {
+            const radioName = await el.getAttribute('name') || field.selector;
+            const mapping: FieldMapping = {
+              field: {
+                selector: field.selector,
+                elementType: 'input',
+                inputType: 'radio',
+                fieldName: radioName,
+                label: field.label,
+                required: field.required,
+                frame,
+                options: (field.options || []).map(o => ({ value: o, text: o })),
+              },
+              mappedData: field.answer,
+              needsAI: false,
+            };
+            const attempt = await this.fieldFiller.fill(mapping, page);
+            if (attempt.success) {
+              console.log(`[AIFill] radio "${label}" → "${field.answer}"`);
+              handled = true;
+            } else {
+              console.log(`[AIFill] radio "${label}" failed: ${attempt.error}`);
+            }
+
+          } else if (field.type === 'checkbox') {
+            const v = field.answer.toLowerCase();
+            const shouldCheck = ['yes', 'true', '1', 'agree', 'accept', 'checked'].some(kw => v.includes(kw));
+            await el.setChecked(shouldCheck);
+            console.log(`[AIFill] checkbox "${label}" → ${shouldCheck}`);
+            handled = true;
+          }
+
+          if (handled) {
+            filled++;
+            break;
           }
         }
 
-        // Check if href looks like a different page (not just #anchor)
-        if (
-          href.startsWith('./') ||
-          href.startsWith('../') ||
-          href.includes('.html') ||
-          href.includes('.php') ||
-          href.includes('/')
-        ) {
-          // This could be navigation to a different page
-          return true;
+        if (!handled) {
+          console.log(`[AIFill] SKIP "${label}" — selector not found: ${field.selector}`);
+          failed++;
         }
+      } catch (err: any) {
+        console.log(`[AIFill] ERROR "${label}": ${err?.message || err}`);
+        failed++;
+      }
+    }
 
-        // If href starts with ?, it's likely a query parameter change (same page)
-        if (href.startsWith('?')) {
-          return false;
+    console.log(`[AIFill] Done — filled: ${filled}, failed/skipped: ${failed}`);
+    return { filled, failed };
+  }
+
+  /**
+   * Returns true when the current page already IS an application form
+   * (i.e. it has several visible input/textarea/select fields), so we
+   * should skip looking for an "Apply" link and re-navigating.
+   */
+  private async isFormPage(page: Page): Promise<boolean> {
+    const count = await page.evaluate(() =>
+      document.querySelectorAll(
+        'input:not([type="hidden"]):not([type="submit"]):not([type="button"]), textarea, select'
+      ).length
+    ).catch(() => 0);
+    return count >= 3;
+  }
+
+  public async processSingleApplication(
+    jobUrl: string,
+    coverLetter: string,
+    resumePath: string,
+    userProfile: UserProfile,
+    resumeText: string,
+    applyLink?: string,
+    structuredResume?: StructuredResume | null
+  ): Promise<ApplicationResult> {
+    const page = await this.createPage();
+
+    try {
+      // 1. Navigate to the provided URL
+      await this.navigateToJobUrl(page, jobUrl);
+
+      // If the URL is already the application form (e.g. app.greenhouse.io/embed/job_app?token=…,
+      // a direct Workable /apply link, etc.) skip the "find apply link" step entirely.
+      const alreadyOnForm = applyLink
+        ? false  // caller gave an explicit separate apply link — honour it
+        : await this.isFormPage(page);
+
+      let applicationLink: string | null;
+      if (alreadyOnForm) {
+        console.log('[Orchestrator] jobUrl appears to be the application form itself — skipping link discovery.');
+        applicationLink = jobUrl;
+      } else {
+        applicationLink = await this.findApplicationLink(page, applyLink);
+      }
+
+      if (!applicationLink) {
+        return {
+          success: false,
+          error: 'Could not find application link on the job page.',
+        };
+      }
+
+      // 2. Navigate to the application form (no-op when we're already on it)
+      if (applicationLink !== jobUrl) {
+        await this.navigateToApplicationPage(page, applicationLink);
+      }
+      await this.waitForForm(page);
+
+      // 2b. Upload resume early so the ATS can auto-populate what it can
+      await this.uploadResume(page, resumePath);
+      await page.waitForTimeout(2000); // give ATS time to parse and populate
+
+      // 2c. Detect which frame holds the form (main frame for direct URLs, iframe for embedded ATSes)
+      const formFrame = await this.getFormFrame(page);
+
+      // 3. Detect platform (read URL/DOM from the form frame)
+      const formAnalysis = await this.formAnalyzer.analyze(formFrame);
+      console.log('[Orchestrator] Form analysis:', formAnalysis);
+
+      // 4. Expand dynamic sections (+ Add buttons) so all fields are visible before extraction
+      await this.formAnalyzer.expandDynamicSections(formFrame, async () => {
+        return await formFrame.evaluate(() =>
+          document.querySelectorAll('input:not([type="hidden"]):not([disabled]), textarea:not([disabled]), select:not([disabled])').length
+        );
+      });
+
+      // 5a. Get cleaned form HTML
+      const formHTML = await this.htmlExtractor.getFormHTML(page);
+
+      // 5b. Augment resume text with structured profile fields
+      const augmentedResume = [
+        resumeText,
+        '\n--- Additional Profile Details ---',
+        userProfile.phone        ? `Phone: ${userProfile.phone}` : '',
+        userProfile.location     ? `Location: ${userProfile.location}` : '',
+        userProfile.linkedin     ? `LinkedIn: ${userProfile.linkedin}` : '',
+        userProfile.github       ? `GitHub: ${userProfile.github}` : '',
+        userProfile.currentCTC   ? `Current CTC: ${userProfile.currentCTC}` : '',
+        userProfile.expectedCTC  ? `Expected CTC: ${userProfile.expectedCTC}` : '',
+        userProfile.noticePeriod ? `Notice Period: ${userProfile.noticePeriod}` : '',
+      ].filter(Boolean).join('\n');
+
+      // 5c. Single batch AI call: form XML + resume → all field answers at once
+      const aiFields = await this.htmlExtractor.extractAndAnswerFields(formHTML, augmentedResume, {
+        coverLetterText: coverLetter || undefined,
+      });
+
+      if (aiFields.length === 0) {
+        console.log('[Orchestrator] AI returned no fields — taking screenshot and aborting fill.');
+        const screenshot = await page.screenshot({ fullPage: true });
+        const screenshotPath = path.join(os.tmpdir(), `job-agent-verify-${Date.now()}.png`);
+        fs.writeFileSync(screenshotPath, screenshot);
+        return { success: false, screenshot, screenshotPath, error: 'AI could not extract any form fields from the page HTML.' };
+      }
+
+      // Find the profile summary answer so it can be re-applied after structured entry filling
+      // (React re-renders during experience/education saves can clear controlled textareas)
+      const profileSummaryAnswer = aiFields.find(
+        f => f.type === 'textarea' && f.label?.toLowerCase() === 'summary' &&
+             !['detail','question','additional','screening','experience','work','job','employment','education']
+               .some(kw => (f.section || '').toLowerCase().includes(kw))
+      )?.answer || structuredResume?.summary || '';
+
+      // 5d. Generate cover letter PDF if cover letter text is available
+      let coverLetterPdfPath: string | undefined;
+      if (coverLetter) {
+        coverLetterPdfPath = path.join(os.tmpdir(), `cover-letter-${Date.now()}.pdf`);
+        try {
+          const { CoverLetterGenerator } = await import('./cover-letter-generator');
+          await new CoverLetterGenerator().generateCoverLetterPDF(coverLetter, coverLetterPdfPath);
+          console.log(`[Orchestrator] Cover letter PDF written to ${coverLetterPdfPath}`);
+        } catch (err) {
+          console.log('[Orchestrator] Cover letter PDF generation failed, skipping:', err);
+          coverLetterPdfPath = undefined;
         }
       }
 
-      // Check for onclick that might navigate
-      if (onclick) {
-        const onclickLower = onclick.toLowerCase();
-        if (
-          onclickLower.includes('window.location') ||
-          onclickLower.includes('window.open') ||
-          onclickLower.includes('location.href') ||
-          onclickLower.includes('document.location')
-        ) {
-          return true;
-        }
+      // 6. Fill all fields using AI-provided selectors and answers
+      await this.fillFromAIFields(page, aiFields, resumePath, coverLetterPdfPath);
+
+      // 6b. Fill structured experience/education entries then re-fill profile summary
+      if (structuredResume) {
+        await this.fillStructuredEntries(page, formFrame, structuredResume, profileSummaryAnswer, resumePath);
       }
 
-      // For buttons, check if they have form action or similar
-      if (tagName === 'button' || tagName === 'input') {
-        const formAction = await element.getAttribute('formaction');
-        if (formAction) {
-          return true;
-        }
+      // 7. Take screenshot and save to disk for skill verification
+      const screenshot = await page.screenshot({ fullPage: true });
+      const screenshotPath = path.join(os.tmpdir(), `job-agent-verify-${Date.now()}.png`);
+      fs.writeFileSync(screenshotPath, screenshot);
+      console.log(`[Orchestrator] Verification screenshot saved: ${screenshotPath}`);
+
+      // 8. Submit (only if JOB_AGENT_AUTO_SUBMIT=true)
+      const autoSubmit = process.env.JOB_AGENT_AUTO_SUBMIT === 'true';
+      if (!autoSubmit) {
+        console.log('[Orchestrator] Auto-submit disabled. Form filled and left open for review.');
+        return { success: true, screenshot, screenshotPath, submittedAt: undefined };
       }
 
-      return false;
+      const submitted = await this.submitForm(page);
+
+      return {
+        success: submitted,
+        screenshot,
+        screenshotPath,
+        submittedAt: submitted ? new Date() : undefined,
+        error: submitted ? undefined : 'Form submission might have failed or not detected.',
+      };
     } catch (error) {
-      // If we can't determine, err on the side of caution
-      console.log(`[DEV] Error checking if element will navigate: ${error}`);
-      return true; // Assume it will navigate to be safe
+      console.log('[DEV] Error processing single application:', error);
+      const screenshot = await page.screenshot({ fullPage: true }).catch(() => undefined);
+      let screenshotPath: string | undefined;
+      if (screenshot) {
+        screenshotPath = path.join(os.tmpdir(), `job-agent-verify-${Date.now()}.png`);
+        fs.writeFileSync(screenshotPath, screenshot);
+      }
+
+      return {
+        success: false,
+        screenshot,
+        screenshotPath,
+        error: `Error processing application: ${error}`,
+      };
+    } finally {
+      const headless = process.env.BROWSER_HEADLESS === 'true';
+      if (headless) {
+        await page.close();
+      }
     }
   }
 
-  async processMultipleApplications(
-    applications: Array<{
+  public async processMultipleApplications(
+    applications: {
       jobUrl: string;
       coverLetter: string;
       resumePath: string;
-      applyLink?: string; // Optional link to apply page if different from job page
-      resumeText?: string; // Resume text for AI processing
-    }>,
+      applyLink?: string;
+      resumeText: string;
+      structuredResume?: StructuredResume | null;
+    }[],
     userProfile: UserProfile
   ): Promise<ApplicationResult[]> {
     const results: ApplicationResult[] = [];
 
-    for (const app of applications) {
+    for (const application of applications) {
       try {
-        const result = await this.fillApplication(
-          app.jobUrl,
+        const result = await this.processSingleApplication(
+          application.jobUrl,
+          application.coverLetter,
+          application.resumePath,
           userProfile,
-          app.coverLetter,
-          app.resumePath,
-          app.applyLink,
-          app.resumeText
+          application.resumeText,
+          application.applyLink,
+          application.structuredResume
         );
         results.push(result);
 
