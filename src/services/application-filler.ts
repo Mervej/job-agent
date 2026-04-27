@@ -1,5 +1,5 @@
 import { chromium, Browser, Page, Frame } from 'playwright';
-import { UserProfile } from './cover-letter-generator';
+import { UserProfile, CoverLetterGenerator } from './cover-letter-generator';
 import { generateText } from './ai.service';
 import * as os from 'os';
 import * as fs from 'fs';
@@ -2450,7 +2450,6 @@ ${resumeContext}`;
       if (coverLetter) {
         coverLetterPdfPath = path.join(os.tmpdir(), `cover-letter-${Date.now()}.pdf`);
         try {
-          const { CoverLetterGenerator } = await import('./cover-letter-generator');
           await new CoverLetterGenerator().generateCoverLetterPDF(coverLetter, coverLetterPdfPath);
           console.log(`[Orchestrator] Cover letter PDF written to ${coverLetterPdfPath}`);
         } catch (err) {
@@ -2460,7 +2459,13 @@ ${resumeContext}`;
       }
 
       // 6. Fill all fields using AI-provided selectors and answers
-      await this.fillFromAIFields(page, aiFields, resumePath, coverLetterPdfPath);
+      try {
+        await this.fillFromAIFields(page, aiFields, resumePath, coverLetterPdfPath);
+      } finally {
+        if (coverLetterPdfPath) {
+          fs.unlink(coverLetterPdfPath, () => {});
+        }
+      }
 
       // 6b. Fill structured experience/education entries then re-fill profile summary
       if (structuredResume) {
