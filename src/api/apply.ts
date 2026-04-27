@@ -2,7 +2,13 @@ import express from 'express';
 import { JobCrawler } from '../services/job-crawler';
 import { CoverLetterGenerator } from '../services/cover-letter-generator';
 import { ApplicationFiller } from '../services/application-filler';
-import { insertApplication, getResumeById, getUserProfileFromResume } from '../services/db';
+import {
+  insertApplication,
+  getResumeById,
+  getUserProfileFromResume,
+  getStructuredResumeById,
+  checkIfAlreadyApplied,
+} from '../services/db';
 import path from 'path';
 
 const router = express.Router();
@@ -21,13 +27,21 @@ router.post('/jobs', async (req, res) => {
     }
 
     // Get user profile from stored resume
-    const userProfile = getUserProfileFromResume(resumeId);
-    if (!userProfile || !userProfile.name || !userProfile.email) {
+    const rawProfile = getUserProfileFromResume(resumeId);
+    if (!rawProfile || !rawProfile.name || !rawProfile.email) {
       return res.status(400).json({
         error:
           'Resume not found or missing user profile. Please upload resume with profile information first.',
       });
     }
+    const userProfile = {
+      ...rawProfile,
+      name: rawProfile.name!,
+      email: rawProfile.email!,
+      experience: rawProfile.experience || '',
+      skills: rawProfile.skills || [],
+      achievements: rawProfile.achievements || [],
+    };
 
     // Initialize services
     const jobCrawler = new JobCrawler();
@@ -35,36 +49,66 @@ router.post('/jobs', async (req, res) => {
     const applicationFiller = new ApplicationFiller();
 
     try {
-      // Step 1: Crawl job descriptions
+      // Step 1: Filter out already-applied jobs
+      const newUrls = jobUrls.filter((url: string) => {
+        // if (checkIfAlreadyApplied(url)) {
+        //   console.log(`[Dedup] Skipping already-applied job: ${url}`);
+        //   return false;
+        // }
+        return true;
+      });
+
+      if (newUrls.length === 0) {
+        return res.json({
+          message: 'All jobs have already been applied to.',
+          results: [],
+        });
+      }
+
+      if (newUrls.length < jobUrls.length) {
+        console.log(`[Dedup] Filtered ${jobUrls.length - newUrls.length} duplicate(s). Processing ${newUrls.length} new job(s).`);
+      }
+
+      // Step 2: Crawl job descriptions
       console.log('Crawling job descriptions...');
-      const jobDescriptions = await jobCrawler.crawlMultipleJobs(jobUrls);
+      const jobDescriptions = await jobCrawler.crawlMultipleJobs(newUrls);
 
       if (jobDescriptions.length === 0) {
         return res.status(400).json({ error: 'No job descriptions could be extracted' });
       }
 
-      // Step 2: Get resume text (you'll need to implement this)
+      // Step 2: Get resume text and structured resume
       const resumeText = await getResumeText(resumeId);
       if (!resumeText) {
         return res.status(400).json({ error: 'Resume not found' });
       }
 
-      // Step 3: Generate cover letters
+      // Get structured resume for better AI context
+      const structuredResume = getStructuredResumeById(resumeId);
+
+      // Step 3: Generate cover letters for each job
       console.log('Generating cover letters...');
-      const coverLetters = await coverLetterGenerator.generateMultipleCoverLetters(
-        jobDescriptions,
-        userProfile,
-        resumeText
+      const coverLetters = await Promise.all(
+        jobDescriptions.map(job =>
+          coverLetterGenerator.generateCoverLetter(job, userProfile, resumeText).catch(err => {
+            console.error(`[CoverLetter] Failed for ${job.url}:`, err);
+            return '';
+          })
+        )
       );
 
       // Step 4: Fill applications
       console.log('Filling applications...');
-      const applications = coverLetters.map((cl, index) => ({
-        jobUrl: cl.jobUrl,
-        coverLetter: cl.coverLetter,
-        resumePath: path.join(__dirname, '..', 'data', 'resumes', `${resumeId}.pdf`),
-        applyLink: jobDescriptions[index].applyLink, // Include the apply link if it's on a different page
-        resumeText, // Include resume text for AI processing
+      await applicationFiller.init();
+      const resumeRecord = getResumeById(resumeId) as any;
+      const resumeFilePath = path.join(__dirname, '..', 'data', 'resumes', resumeRecord.filename);
+      const applications = jobDescriptions.map((job, index) => ({
+        jobUrl: job.url,
+        coverLetter: coverLetters[index],
+        resumePath: resumeFilePath,
+        applyLink: jobDescriptions[index].applyLink,
+        resumeText,
+        structuredResume,
       }));
 
       const results = await applicationFiller.processMultipleApplications(
@@ -77,13 +121,12 @@ router.post('/jobs', async (req, res) => {
       for (let i = 0; i < results.length; i++) {
         const result = results[i];
         const jobDesc = jobDescriptions[i];
-        const coverLetter = coverLetters[i];
 
         const applicationId = insertApplication(
           jobDesc.url,
           result.success ? 'submitted' : 'failed',
           JSON.stringify({
-            coverLetter: coverLetter.coverLetter,
+            coverLetter: applications[i].coverLetter,
             error: result.error,
             submittedAt: result.submittedAt,
           })
@@ -96,6 +139,7 @@ router.post('/jobs', async (req, res) => {
           applicationId,
           success: result.success,
           error: result.error,
+          screenshotPath: result.screenshotPath,
         });
       }
 
@@ -127,32 +171,42 @@ router.post('/job', async (req, res) => {
       return res.status(400).json({ error: 'resumeId is required' });
     }
 
-    // Get user profile from stored resume
-    const userProfile = getUserProfileFromResume(resumeId);
-    if (!userProfile || !userProfile.name || !userProfile.email) {
+    const rawProfile = getUserProfileFromResume(resumeId);
+    if (!rawProfile || !rawProfile.name || !rawProfile.email) {
       return res.status(400).json({
         error:
           'Resume not found or missing user profile. Please upload resume with profile information first.',
       });
     }
+    const userProfile = {
+      ...rawProfile,
+      name: rawProfile.name!,
+      email: rawProfile.email!,
+      experience: rawProfile.experience || '',
+      skills: rawProfile.skills || [],
+      achievements: rawProfile.achievements || [],
+    };
 
-    // Initialize services
+    // Dedup check for single job
+    if (checkIfAlreadyApplied(jobUrl)) {
+      return res.status(409).json({ error: `Already applied to ${jobUrl}` });
+    }
+
     const jobCrawler = new JobCrawler();
     const coverLetterGenerator = new CoverLetterGenerator();
     const applicationFiller = new ApplicationFiller();
 
     try {
-      // Step 1: Crawl job description
       console.log('Crawling job description...');
       const jobDescription = await jobCrawler.crawlJobDescription(jobUrl);
 
-      // Step 2: Get resume text
       const resumeText = await getResumeText(resumeId);
       if (!resumeText) {
         return res.status(400).json({ error: 'Resume not found' });
       }
 
-      // Step 3: Generate cover letter
+      const structuredResume = getStructuredResumeById(resumeId);
+
       console.log('Generating cover letter...');
       const coverLetter = await coverLetterGenerator.generateCoverLetter(
         jobDescription,
@@ -160,18 +214,26 @@ router.post('/job', async (req, res) => {
         resumeText
       );
 
-      // Step 4: Fill application
       console.log('Filling application...');
-      const result = await applicationFiller.fillApplication(
-        jobUrl,
-        userProfile,
-        coverLetter,
-        path.join(__dirname, '..', 'data', 'resumes', `${resumeId}.pdf`),
-        jobDescription.applyLink, // Pass applyLink if it's different from job page
-        resumeText // Pass resume text for AI processing
+      await applicationFiller.init();
+      const resumeRecord = getResumeById(resumeId) as any;
+      const resumeFilePath = path.join(__dirname, '..', 'data', 'resumes', resumeRecord.filename);
+      const results = await applicationFiller.processMultipleApplications(
+        [
+          {
+            jobUrl,
+            coverLetter,
+            resumePath: resumeFilePath,
+            applyLink: jobDescription.applyLink,
+            resumeText,
+            structuredResume,
+          },
+        ],
+        userProfile
       );
 
-      // Step 5: Save to database
+      const result = results[0];
+
       const applicationId = insertApplication(
         jobUrl,
         result.success ? 'submitted' : 'failed',
@@ -191,7 +253,6 @@ router.post('/job', async (req, res) => {
         coverLetter,
       });
     } finally {
-      // Clean up
       await jobCrawler.close();
       await applicationFiller.close();
     }
