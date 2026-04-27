@@ -1,6 +1,6 @@
 import { generateText } from './ai.service';
 import { JobDescription } from './job-crawler';
-import PDFDocument from 'pdfkit';
+import PDFDocument = require('pdfkit');
 import fs from 'fs';
 
 export interface UserProfile {
@@ -127,6 +127,7 @@ Generate a polished, personal, job-specific cover letter that clearly connects t
       const doc = new PDFDocument({ margin: 72, size: 'A4' });
       const stream = fs.createWriteStream(outputPath);
       doc.pipe(stream);
+      doc.on('error', reject);
       doc.fontSize(11).font('Helvetica').text(text, { lineGap: 4 });
       doc.end();
       stream.on('finish', resolve);
