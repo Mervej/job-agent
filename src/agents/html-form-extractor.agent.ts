@@ -31,11 +31,13 @@ OUTPUT FORMAT — return ONLY valid JSON, no markdown, no code fences:
 ]
 
 RULES:
-- Copy selector, label, type, required, and options EXACTLY from the XML — do not modify them
+- Copy selector, label, type, and required EXACTLY from the XML — do not modify them
+- For "options": parse the <options> child element as a JSON array of strings (e.g. ["India", "United States"]); use [] if no <options> element
 - For "answer":
   - text/email/tel: extract exact value from resume (e.g. full email address, full phone number with country code)
   - textarea for cover letter (label contains "cover letter" or "motivation letter"): use the provided cover letter text verbatim
   - textarea for other fields: write a relevant answer in first person, no markdown, no headings
+  - if the field has a maxlength attribute in the XML, keep your answer within that many characters
   - select/radio: return EXACTLY one of the <options> values, word-for-word
   - file input with label containing "cover letter": return "COVER_LETTER_FILE"
   - file input (resume/cv): return "RESUME_FILE"
@@ -312,7 +314,13 @@ export class HtmlFormExtractorAgent {
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       console.log(`[HtmlExtractor] Batch answering fields (attempt ${attempt}/${MAX_ATTEMPTS}) for ${formHTML.length} char form...`);
 
-      const response = await generateText(BATCH_SYSTEM_PROMPT, userPrompt, 4000);
+      let response: string;
+      try {
+        response = await generateText(BATCH_SYSTEM_PROMPT, userPrompt, 8000);
+      } catch (err) {
+        console.log(`[HtmlExtractor] generateText error on attempt ${attempt}:`, err);
+        continue;
+      }
       if (!response?.trim()) {
         console.log(`[HtmlExtractor] Empty response on attempt ${attempt}`);
         continue;
@@ -342,7 +350,10 @@ export class HtmlFormExtractorAgent {
     // Try full parse first
     try {
       const parsed = JSON.parse(cleaned);
-      if (Array.isArray(parsed)) return parsed as AIField[];
+      if (Array.isArray(parsed)) {
+        const valid = parsed.filter((obj: any) => obj.selector && obj.label && obj.type !== undefined);
+        if (valid.length > 0) return valid.map((obj: any) => ({ ...obj, answer: obj.answer ?? '' })) as AIField[];
+      }
     } catch { /* fall through */ }
 
     // Partial recovery: extract each complete {...} object
