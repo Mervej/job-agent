@@ -1,7 +1,11 @@
 import { generateText } from './ai.service';
 import { JobDescription } from './job-crawler';
+import PDFDocument from 'pdfkit';
+import fs from 'fs';
 
 export interface UserProfile {
+  currentRole?: string | undefined;
+  currentCompany?: string | undefined;
   name: string;
   email: string;
   phone?: string;
@@ -11,6 +15,11 @@ export interface UserProfile {
   experience: string;
   skills: string[];
   achievements: string[];
+  expectedCTC?: string;
+  currentCTC?: string;
+  noticePeriod?: string;
+  workAuthorization?: string;
+  willingToRelocate?: string; // 'Yes' | 'No' — defaults to 'Yes' if not set
 }
 
 export class CoverLetterGenerator {
@@ -19,52 +28,68 @@ export class CoverLetterGenerator {
     userProfile: UserProfile,
     resumeText: string
   ): Promise<string> {
-    const systemPrompt = `You are a professional career coach and cover letter expert. Generate a compelling, personalized cover letter that:
-1. Is 3-4 paragraphs long
-2. Directly addresses the job requirements
-3. Highlights relevant experience and skills
-4. Shows enthusiasm for the specific role and company
-5. Uses a professional but engaging tone
-6. Avoids generic phrases and clichés
-7. Includes specific examples when possible`;
+    //
+    // SYSTEM PROMPT (goes to {{ .System }} in your Modelfile)
+    //
+    const systemPrompt = `
+You are a professional career coach and expert cover-letter writer.
 
+Your responsibilities:
+- Write a compelling, authentic, human-sounding cover letter.
+- Make it personalized to the role and company.
+- Keep it professional, warm, and confident.
+- Avoid clichés, generic phrases, and AI-like wording.
+- Never mention that you are generating text or referencing prompts.
+
+Structure the output:
+- 3–4 natural paragraphs
+- Opening: why the candidate is a strong fit
+- Middle: relevant experience, skills, achievements tied to job requirements
+- Ending: enthusiasm + call to continue the conversation
+
+Do NOT include explanations — output only the final cover letter.
+    `.trim();
+
+    //
+    // USER PROMPT (goes to {{ .Prompt }} in your Modelfile)
+    //
     const userPrompt = this.buildUserPrompt(jobDescription, userProfile, resumeText);
 
     return await generateText(systemPrompt, userPrompt);
   }
 
-  private buildUserPrompt(
-    jobDescription: JobDescription,
-    userProfile: UserProfile,
-    resumeText: string
-  ): string {
+  private buildUserPrompt(job: JobDescription, user: UserProfile, resumeText: string): string {
     return `
-Generate a cover letter for this position:
+Write a tailored cover letter based on the following structured data.
 
-JOB DETAILS:
-- Title: ${jobDescription.title}
-- Company: ${jobDescription.company}
-- Location: ${jobDescription.location || 'Not specified'}
-- URL: ${jobDescription.url}
+### JOB DETAILS
+- Title: ${job.title}
+- Company: ${job.company}
+- Location: ${job.location || 'Not specified'}
+- URL: ${job.url}
 
-JOB DESCRIPTION:
-${jobDescription.description}
+### JOB DESCRIPTION
+${job.description || 'Not provided'}
 
-KEY REQUIREMENTS:
-${jobDescription.requirements?.join(', ') || 'Not specified'}
+### KEY REQUIREMENTS
+${job.requirements?.join(', ') || 'Not specified'}
 
-CANDIDATE PROFILE:
-- Name: ${userProfile.name}
-- Email: ${userProfile.email}
-- Experience: ${userProfile.experience}
-- Key Skills: ${userProfile.skills.join(', ')}
-- Notable Achievements: ${userProfile.achievements.join(', ')}
+### CANDIDATE PROFILE
+- Name: ${user.name}
+- Email: ${user.email}
+- Experience summary: ${user.experience}
+- Skills: ${user.skills.join(', ')}
+- Key achievements: ${user.achievements.join(', ')}
+${user.linkedin ? `- LinkedIn: ${user.linkedin}` : ''}
+${user.github ? `- GitHub: ${user.github}` : ''}
+${user.location ? `- Location: ${user.location}` : ''}
 
-RESUME SUMMARY:
-${resumeText.slice(0, 2000)}
+### RESUME SUMMARY (TRUNCATED)
+${resumeText.slice(0, 1800)}
 
-Please write a compelling cover letter that connects the candidate's experience and skills to the specific job requirements. Make it personal and specific to this role and company.
-`;
+### GUIDANCE
+Generate a polished, personal, job-specific cover letter that clearly connects the candidate’s background to the requirements. Use warm professional language, first-person perspective, and avoid clichés.
+    `.trim();
   }
 
   async generateMultipleCoverLetters(
@@ -77,13 +102,14 @@ Please write a compelling cover letter that connects the candidate's experience 
     for (const job of jobDescriptions) {
       try {
         const coverLetter = await this.generateCoverLetter(job, userProfile, resumeText);
+
         results.push({
           jobUrl: job.url,
           coverLetter,
         });
 
-        // Add delay between AI requests to avoid rate limiting
-        await new Promise((resolve) => setTimeout(resolve, 1000));
+        // Small delay between requests
+        await new Promise((resolve) => setTimeout(resolve, 800));
       } catch (error) {
         console.error(`Failed to generate cover letter for ${job.url}:`, error);
         results.push({
@@ -94,5 +120,17 @@ Please write a compelling cover letter that connects the candidate's experience 
     }
 
     return results;
+  }
+
+  async generateCoverLetterPDF(text: string, outputPath: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const doc = new PDFDocument({ margin: 72, size: 'A4' });
+      const stream = fs.createWriteStream(outputPath);
+      doc.pipe(stream);
+      doc.fontSize(11).font('Helvetica').text(text, { lineGap: 4 });
+      doc.end();
+      stream.on('finish', resolve);
+      stream.on('error', reject);
+    });
   }
 }
