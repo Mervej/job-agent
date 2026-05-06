@@ -43,7 +43,7 @@ export class JobCrawler {
           'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
       });
 
-      await page.goto(url, { waitUntil: 'networkidle' });
+      await page.goto(url, { waitUntil: 'domcontentloaded' });
 
       // Wait for content to load
       await page.waitForTimeout(2000);

@@ -2,7 +2,7 @@ import express from 'express';
 import formidable from 'formidable';
 import path from 'path';
 import fs from 'fs';
-import { parseResume } from '../services/resume';
+import { parseResume, parseResumeToStructured } from '../services/resume';
 import {
   insertResume,
   getAllResumes,
@@ -42,16 +42,43 @@ router.post('/', (req, res) => {
       experience: getFieldValue(fields.experience),
       skills: fields.skills ? JSON.parse(getFieldValue(fields.skills)) : [],
       achievements: fields.achievements ? JSON.parse(getFieldValue(fields.achievements)) : [],
+      expectedCTC: getFieldValue(fields.expectedCTC),
+      currentCTC: getFieldValue(fields.currentCTC),
+      noticePeriod: getFieldValue(fields.noticePeriod),
+      workAuthorization: getFieldValue(fields.workAuthorization),
     };
 
     const text = await parseResume(savedPath);
-    const id = insertResume(path.basename(savedPath), text, userProfile);
+
+    // Parse resume to structured format
+    console.log('Parsing resume to structured format...');
+    const structuredResume = await parseResumeToStructured(text);
+
+    // Extract profile details from structured resume if not provided in form
+    const finalUserProfile = {
+      name: userProfile.name || structuredResume.profileDetails.name || '',
+      email: userProfile.email || structuredResume.profileDetails.email || '',
+      phone: userProfile.phone || structuredResume.profileDetails.phone || '',
+      location: userProfile.location || structuredResume.profileDetails.location || '',
+      linkedin: userProfile.linkedin || structuredResume.profileDetails.linkedin || '',
+      github: userProfile.github || structuredResume.profileDetails.github || '',
+      experience: userProfile.experience || structuredResume.summary || '',
+      skills: userProfile.skills.length > 0 ? userProfile.skills : structuredResume.skills || [],
+      achievements: userProfile.achievements || [],
+      expectedCTC: userProfile.expectedCTC || '',
+      currentCTC: userProfile.currentCTC || '',
+      noticePeriod: userProfile.noticePeriod || '',
+      workAuthorization: userProfile.workAuthorization || '',
+    };
+
+    const id = insertResume(path.basename(savedPath), text, finalUserProfile, structuredResume);
 
     return res.json({
       id,
       filename: path.basename(savedPath),
       textSnippet: text.slice(0, 800),
-      userProfile,
+      userProfile: finalUserProfile,
+      structuredResume,
     });
   });
 });

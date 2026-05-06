@@ -1,7 +1,7 @@
 import config from '../config/ai.config';
 import axios from 'axios';
 
-export async function generateText(systemPrompt: string, userPrompt: string) {
+export async function generateText(systemPrompt: string, userPrompt: string, maxTokens = 600) {
   if (config.provider === 'openai') {
     console.log('config ', config.openai);
     if (!config.openai.apiKey) throw new Error('OPENAI_API_KEY not set');
@@ -13,78 +13,84 @@ export async function generateText(systemPrompt: string, userPrompt: string) {
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt },
         ],
-        max_tokens: 600,
+        max_tokens: maxTokens,
       },
       { headers: { Authorization: `Bearer ${config.openai.apiKey}` } }
     );
     return res.data.choices[0].message.content as string;
   } else if (config.provider === 'ollama') {
     const url = `${config.ollama.url}/api/generate`;
+
     const requestBody = {
       model: config.ollama.model,
-      prompt: `${userPrompt}`,
-      stream: false, // Request non-streaming response
+      system: systemPrompt,
+      prompt: userPrompt,
+      stream: false,
+      options: { num_predict: maxTokens }, // cap output to keep responses fast
     };
 
     console.log(`[Ollama] Calling ${url} with model: ${config.ollama.model}`);
 
     try {
-      const response = await fetch(url, {
-        method: 'POST',
+      const response = await axios.post(url, requestBody, {
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestBody),
+        timeout: 300000, // phi33 takes ~2min per call
       });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error(`[Ollama] API error (${response.status}):`, errorText);
-        console.error(`[Ollama] Request URL: ${url}`);
-        console.error(`[Ollama] Request body:`, JSON.stringify(requestBody, null, 2));
+      const data = response.data;
 
-        // Provide helpful error messages
-        if (response.status === 500) {
-          throw new Error(
-            `Ollama 500 error. Common causes:\n` +
-              `1. Model "${config.ollama.model}" not available. Run: ollama pull ${config.ollama.model}\n` +
-              `2. Ollama server issue. Check: ollama list\n` +
-              `3. Error details: ${errorText}`
-          );
-        }
+      if (data.response) return data.response;
+      if (data.text) return data.text;
+      if (typeof data === 'string') return data;
 
-        throw new Error(
-          `Ollama API error: ${response.status} ${response.statusText}. ${errorText}`
-        );
-      }
-
-      const data = await response.json();
-
-      // Ollama /api/generate returns response in 'response' field
-      if (data.response) {
-        return data.response;
-      }
-
-      // Some versions might return differently
-      if (data.text) {
-        return data.text;
-      }
-
-      // Fallback: check for alternative response formats
-      if (typeof data === 'string') {
-        return data;
-      }
-
-      console.error('[Ollama] Unexpected response format:', JSON.stringify(data, null, 2));
-      throw new Error('Unexpected response format from Ollama API');
+      throw new Error('Unexpected response format from Ollama');
     } catch (error: any) {
-      if (error.message.includes('fetch') || error.message.includes('ECONNREFUSED')) {
+      if (error.code === 'ECONNREFUSED' || error.message?.includes('ECONNREFUSED')) {
         throw new Error(
-          `Failed to connect to Ollama at ${url}.\n` +
-            `Make sure Ollama is running: ollama serve\n` +
-            `Or check if OLLAMA_URL is set correctly in your .env file.`
+          `Could not connect to Ollama at ${url}. Make sure Ollama is running (ollama serve).`
         );
       }
       throw error;
     }
   }
+
   throw new Error('Unsupported AI provider');
+}
+
+/**
+ * Analyzes a page screenshot using the local vision model (moondream).
+ * Used for detecting dynamic UI elements like + buttons, Add sections,
+ * date pickers, and custom components that DOM parsing misses.
+ */
+export async function analyzeScreenshot(imageBuffer: Buffer, prompt: string): Promise<string> {
+  const url = `${config.ollama.url}/api/generate`;
+  const base64Image = imageBuffer.toString('base64');
+
+  console.log(`[Vision] Calling ${url} with model: ${config.ollama.visionModel}`);
+
+  try {
+    const response = await axios.post(
+      url,
+      {
+        model: config.ollama.visionModel,
+        prompt,
+        images: [base64Image],
+        stream: false,
+      },
+      {
+        headers: { 'Content-Type': 'application/json' },
+        timeout: 10000,
+      }
+    );
+
+    const data = response.data;
+
+    if (data.response) return data.response as string;
+    throw new Error('Unexpected response format from vision model');
+  } catch (error: any) {
+    if (error.code === 'ECONNREFUSED' || error.message?.includes('ECONNREFUSED')) {
+      throw new Error(`Could not connect to Ollama at ${url}. Make sure Ollama is running.`);
+    }
+    throw error;
+  }
 }
