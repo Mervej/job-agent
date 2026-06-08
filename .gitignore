@@ -1,5 +1,12 @@
 node_modules/*
 dist/*
 .env*
+!.env.example
 *.db
 .DS_Store
+
+# Runtime data (recreated on startup) — keep personal resumes/DB out of git
+src/data/
+
+# Local Claude/agent tooling state
+.superpowers/

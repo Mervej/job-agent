@@ -2,6 +2,8 @@ import express from 'express';
 import { JobCrawler } from '../services/job-crawler';
 import { CoverLetterGenerator } from '../services/cover-letter-generator';
 import { ApplicationFiller } from '../services/application-filler';
+import { StagehandFiller } from '../services/stagehand-filler';
+import { FieldMapperService } from '../services/field-mapper.service';
 import {
   insertApplication,
   getResumeById,
@@ -12,6 +14,13 @@ import {
 import path from 'path';
 
 const router = express.Router();
+const fieldMapper = new FieldMapperService();
+
+const useStagehand = process.env.USE_STAGEHAND === 'true';
+type FillerInstance = ApplicationFiller | StagehandFiller;
+function createFiller(): FillerInstance {
+  return useStagehand ? new StagehandFiller() : new ApplicationFiller();
+}
 
 // Process multiple job applications
 router.post('/jobs', async (req, res) => {
@@ -46,7 +55,7 @@ router.post('/jobs', async (req, res) => {
     // Initialize services
     const jobCrawler = new JobCrawler();
     const coverLetterGenerator = new CoverLetterGenerator();
-    const applicationFiller = new ApplicationFiller();
+    const applicationFiller = createFiller();
 
     try {
       // Step 1: Filter out already-applied jobs
@@ -194,7 +203,7 @@ router.post('/job', async (req, res) => {
 
     const jobCrawler = new JobCrawler();
     const coverLetterGenerator = new CoverLetterGenerator();
-    const applicationFiller = new ApplicationFiller();
+    const applicationFiller = createFiller();
 
     try {
       console.log('Crawling job description...');
@@ -258,6 +267,57 @@ router.post('/job', async (req, res) => {
     }
   } catch (error: any) {
     console.error('Error processing job application:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Chrome extension endpoint: map extracted form fields to resume values
+router.post('/map-fields', async (req, res) => {
+  const { fields, resumeId, jobUrl } = req.body;
+
+  if (!resumeId) return res.status(400).json({ error: 'resumeId is required' });
+  if (!jobUrl) return res.status(400).json({ error: 'jobUrl is required' });
+  if (!Array.isArray(fields)) return res.status(400).json({ error: 'fields must be an array' });
+
+  try {
+    const result = await fieldMapper.mapFields(fields, resumeId, jobUrl);
+    res.json(result);
+  } catch (error: any) {
+    if (error.message === 'Resume not found') {
+      return res.status(404).json({ error: error.message });
+    }
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Map fields for a single structured entry (experience/education/project)
+router.post('/map-entry-fields', (req, res) => {
+  const { fields, entryType, entryData, resumeText, isCurrentJob } = req.body;
+  if (!fields || !entryType || !entryData) {
+    return res.status(400).json({ error: 'fields, entryType and entryData are required' });
+  }
+  try {
+    const mappings = fieldMapper.mapEntryFields(fields, entryType, entryData, resumeText || '', !!isCurrentJob);
+    res.json({ mappings });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Generate a PDF from cover letter text — used by extension for cover letter file inputs
+router.post('/cover-letter-pdf', (req, res) => {
+  const { text } = req.body;
+  if (!text) return res.status(400).json({ error: 'text is required' });
+
+  try {
+    const PDFDocument = require('pdfkit');
+    const doc = new PDFDocument({ margin: 72, size: 'A4' });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'inline; filename="cover-letter.pdf"');
+    doc.pipe(res);
+    doc.font('Helvetica').fontSize(11).text(text, { lineGap: 4 });
+    doc.end();
+  } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
 });

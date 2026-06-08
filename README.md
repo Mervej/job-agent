@@ -1,245 +1,186 @@
 # Job Agent — AI-Powered Job Application Assistant
 
-An intelligent, local-first job application automation system that helps streamline the job search process. Built with Node.js, TypeScript, and modern web technologies, this agent can automatically fill out job applications, generate tailored cover letters, and manage your job search workflow.
+> Auto-fills job application forms from your resume — using AI, running inside your real browser via a Chrome extension.
 
-## Features
+![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)
+![Node.js](https://img.shields.io/badge/Node.js-339933?logo=node.js&logoColor=white)
+![Express](https://img.shields.io/badge/Express-000000?logo=express&logoColor=white)
+![SQLite](https://img.shields.io/badge/SQLite-003B57?logo=sqlite&logoColor=white)
+![Chrome Extension](https://img.shields.io/badge/Chrome%20Extension-MV3-4285F4?logo=googlechrome&logoColor=white)
+![OpenAI](https://img.shields.io/badge/OpenAI-412991?logo=openai&logoColor=white)
+![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)
 
-- **Resume Management**: Upload and parse PDF resumes with structured data extraction
-- **AI Cover Letter Generation**: Generate personalized cover letters using OpenAI GPT or local Ollama models
-- **Job Description Crawling**: Automatically extract job details from any job posting URL
-- **Automated Form Filling**: Intelligent form detection and completion using Playwright browser automation
-- **Local Data Storage**: SQLite database for persistent storage with no external dependencies
-- **Multi-Provider AI Support**: Switch between OpenAI and Ollama for AI generation
-- **RESTful API**: Clean HTTP API for integration with other tools
+Job Agent is a local-first assistant that takes the tedium out of job applications. Upload your resume once; then on any job application page, a Chrome extension detects the form, asks an AI backend to map your resume onto the fields, and fills them in — flagging anything it isn't confident about for you to review. It runs in your own browser session, so there's no headless automation and no anti-bot detection. **It never submits for you** — you always review and click submit yourself.
 
-## Technical Architecture
+---
 
-### Core Technologies
+## Demo
 
-- **Backend**: Node.js with Express.js server
-- **Language**: TypeScript for type safety and better developer experience
-- **Database**: SQLite with better-sqlite3 for local data persistence
-- **Browser Automation**: Playwright for headless browser control and form interaction
-- **AI Integration**: OpenAI GPT API or Ollama for local AI model inference
-- **PDF Processing**: pdf-parse for resume text extraction
-- **File Uploads**: Formidable for multipart file handling
+![Job Agent filling an application form](docs/assets/demo.gif)
 
-### Key Services
+*The side panel detects the application page, maps the resume to the form, and fills each field — flagging low-confidence answers for review.*
 
-#### Application Filler (`application-filler.ts`)
+---
 
-- **Playwright Integration**: Launches Chromium browser for form interaction
-- **Smart Field Detection**: Analyzes HTML forms to identify input types, labels, and requirements
-- **AI-Powered Mapping**: Uses AI to intelligently map resume data to form fields
-- **Form Validation**: Handles required fields, dropdown selections, and complex form structures
-- **Screenshot Capture**: Takes screenshots for debugging and verification
+## Highlights
 
-#### Job Crawler (`job-crawler.ts`)
+- 🧩 **Real-browser form filling** — a Manifest V3 Chrome extension fills forms in your live session. No detection, no flaky headless browser.
+- 🎯 **Smart ATS detection** — recognizes 14 ATS URL patterns (Workable, Greenhouse, Lever, Ashby, +more) plus a generic DOM heuristic for everything else.
+- 🤖 **AI field mapping with confidence scores** — resume data is mapped to form fields by an LLM; low-confidence answers are flagged for manual review instead of guessed.
+- 📝 **Tailored cover letters** — generates a per-job cover letter (and PDF) from the crawled job description.
+- 🔁 **Multi-provider AI** — local Ollama (free), Groq (free cloud tier), or OpenAI, switchable via config.
+- 🔒 **Local-first & private** — resumes and history live in local SQLite; the only outbound calls are to your chosen AI provider.
 
-- **Content Analysis**: Uses heuristics and semantic HTML parsing to extract job details
-- **Generic Extraction**: Works with any job posting website without site-specific selectors
-- **Structured Data**: Extracts title, company, description, location, salary, and requirements
-- **Link Discovery**: Finds application URLs from job description pages
+---
 
-#### AI Service (`ai.service.ts`)
+## How it works
 
-- **Multi-Provider Support**: Configurable between OpenAI and Ollama
-- **Prompt Engineering**: Specialized prompts for cover letter generation and form mapping
-- **Error Handling**: Robust error handling with helpful debugging messages
-- **Token Management**: Efficient token usage with configurable limits
+```
+┌─────────────────────┐         ┌──────────────────────────┐
+│  Chrome Extension   │  HTTP   │   Express Backend (src/)  │
+│  (runs in your tab) │ ──────▶ │                           │
+│  • detect ATS page  │         │  • resume storage (SQLite)│
+│  • extract fields   │ ◀────── │  • cover letter + PDF     │
+│  • fill fields      │ mappings│  • AI field mapping       │
+│  • flag low-conf.   │         │  • job crawler            │
+└─────────────────────┘         └──────────────────────────┘
+```
 
-#### Resume Parser (`resume.ts`)
+1. You open a job application page. The extension detects it (ATS URL pattern or DOM heuristic) and slides in a side panel.
+2. The panel loads your resumes from the backend; you pick one.
+3. The content script extracts the form's fields and sends them to `POST /apply/map-fields`.
+4. The backend crawls the job description, generates a cover letter, and uses AI to map your resume onto each field with a confidence score.
+5. The extension fills the fields. Anything below the confidence threshold is flagged ⚠ with an editable input for you to fix.
+6. On multi-step forms it auto-advances, then **stops at the final review page** for you to submit manually.
 
-- **PDF Text Extraction**: Converts PDF resumes to structured text
-- **Data Normalization**: Standardizes resume data into consistent formats
-- **Profile Extraction**: Pulls contact information, experience, and skills
-- **Structured Storage**: Maintains both raw text and parsed structured data
+Full design write-up: [`docs/superpowers/specs/2026-05-27-chrome-extension-design.md`](docs/superpowers/specs/2026-05-27-chrome-extension-design.md).
 
-### Database Schema
+---
 
-- **Resumes Table**: Stores uploaded resume files and extracted text
-- **Applications Table**: Tracks application submissions with metadata
-- **User Profiles**: Cached profile information for quick access
+## Tech stack
 
-## Quick Start
+**Backend:** Node.js · TypeScript · Express · SQLite (`better-sqlite3`) · pdfkit · pdf-parse
+**AI:** Ollama (local) · Groq · OpenAI — batched field-mapping call
+**Extension:** Chrome Manifest V3 (service worker, content script, side-panel UI)
+**Tests:** Jest (`ts-jest`)
 
-1. **Install Dependencies**
+---
+
+## Components
+
+### Chrome Extension (`extension/`)
+
+| File | Role |
+|---|---|
+| `manifest.json` | MV3 manifest — `activeTab`, `storage`, `scripting` |
+| `background.js` | Service worker; relays `FETCH_RESUMES` / `MAP_FIELDS` messages to the backend |
+| `content-script.js` | Form detection, panel injection, fill cycle, confidence flagging, auto-advance, stop at review |
+| `utils/ats-patterns.js` | 14 ATS URL patterns |
+| `utils/field-extractor.js` | DOM field extraction with label/question resolution |
+| `utils/field-filler.js` | Type-aware filling (text, select, radio, checkbox, combobox, contenteditable) with synthetic React/Vue events |
+| `panel/` | Three-state side panel: **detecting → filling → review** |
+
+### Backend (`src/`)
+
+| Service | Role |
+|---|---|
+| `services/field-mapper.service.ts` | Maps extracted fields → resume values with confidence scores; enforces dropdown options via fuzzy matching |
+| `services/ai.service.ts` | Multi-provider AI (OpenAI / Ollama); single batched mapping call |
+| `services/cover-letter-generator.ts` | Cover letter + PDF generation |
+| `services/job-crawler.ts` | Job detail extraction from any posting URL |
+| `services/resume.ts`, `db.ts`, `encrypt.ts` | Resume parsing + SQLite storage |
+| `agents/` | `form-analyzer`, `field-filler`, `verifier`, `html-form-extractor` |
+
+---
+
+## Run it locally
 
 ```bash
+# 1. Install
 npm install
-```
 
-2. **Configure Environment**
-
-```bash
+# 2. Configure — set OPENAI_API_KEY (or AI_PROVIDER=ollama)
 cp .env.example .env
-# Edit .env to set:
-# - OPENAI_API_KEY (for OpenAI) or OLLAMA_URL/AI_PROVIDER=ollama (for local models)
-# - PORT (optional, defaults to 3000)
-```
 
-3. **Start Development Server**
-
-```bash
+# 3. Start the backend (nodemon + ts-node, debugger on :9229)
 npm run dev
-```
 
-4. **Upload Resume**
-
-```bash
+# 4. Upload a resume
 curl -X POST -F "file=@your-resume.pdf" http://localhost:3000/upload
 ```
 
-5. **Generate Cover Letter**
+**Load the extension:** `chrome://extensions` → enable Developer mode → **Load unpacked** → select `extension/`. Then open a job application page — the side panel appears automatically.
+
+> No live form handy? Open one of the bundled sample forms in `demo-html/` (e.g. `demo-job-page.html`) and run the extension against it.
+
+---
+
+## Deploy (free)
+
+The backend deploys to [Render](https://render.com)'s free tier with no credit card — the repo ships a [`render.yaml`](render.yaml) Blueprint, a `/health` probe, and a compiled-JS start command. Push to GitHub, create a Render Blueprint, paste a free [Groq](https://console.groq.com) API key, and you get a public URL.
+
+Full walkthrough: **[`docs/DEPLOY.md`](docs/DEPLOY.md)**.
+
+---
+
+## API
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /upload` | Upload + parse a PDF resume |
+| `GET /resumes` | List resumes (powers the extension dropdown) |
+| `GET /resumes/:id/file` | Download a resume PDF |
+| `POST /generate/cover-letter` | Generate an AI cover letter |
+| `POST /apply/map-fields` | `{fields[], resumeId, jobUrl}` → `{mappings:[{selector,value,confidence}], coverLetter}` |
+| `GET /apply/status/:id` | Application status |
+
+CORS allows `chrome-extension://` origins.
+
+---
+
+## Tests
 
 ```bash
-curl -X POST http://localhost:3000/generate/cover-letter \
-  -H "Content-Type: application/json" \
-  -d '{
-    "jobTitle": "Backend Engineer",
-    "company": "Example Corp",
-    "jobDescription": "Build scalable microservices...",
-    "resumeSnippet": "Your resume text"
-  }'
+npx jest   # 21 passing across 3 suites
 ```
 
-6. **Apply to Multiple Jobs**
-
-```bash
-curl -X POST http://localhost:3000/apply/jobs \
-  -H "Content-Type: application/json" \
-  -d '{
-    "jobUrls": ["https://example.com/job1", "https://example.com/job2"],
-    "resumeId": "your-resume-id"
-  }'
-```
-
-## Claude Code Skill
-
-### `/apply-jobs`
-
-Autonomously applies to jobs, verifies all form fields are filled, and fixes issues in the source code if needed.
-
-**Usage:**
-```
-/apply-jobs <url1> [url2 ...] [--resume-id <id>]
-```
-
-**Example:**
-```
-/apply-jobs https://apply.workable.com/innovaccer-analytics/j/71B3042036/ --resume-id 11
-```
-
-**What it does:**
-1. Starts the backend on port 3001 if not already running
-2. Calls `POST /apply/jobs` to trigger the full apply flow
-3. Opens the Workable apply form in Chrome and verifies each critical field
-4. If any field is empty, debugs the TypeScript source and fixes it
-5. Iterates up to 3 times, then escalates with a report
-6. Leaves the browser tab open for you to review and submit manually
-
-**Prerequisites:** Claude Code with claude-in-chrome extension installed and Node.js debugger MCP configured.
-
-## API Endpoints
-
-### Resume Management
-
-- `POST /upload` - Upload PDF resume for processing
-- `GET /upload/:id` - Retrieve stored resume information
-
-### Content Generation
-
-- `POST /generate/cover-letter` - Generate AI-powered cover letter
-
-### Job Applications
-
-- `POST /apply/jobs` - Process multiple job applications automatically
-- `GET /apply/status/:id` - Check application submission status
+---
 
 ## Configuration
 
-### Environment Variables
-
 ```env
-# AI Provider Configuration
-AI_PROVIDER=openai|ollama
-OPENAI_API_KEY=your-openai-key
+AI_PROVIDER=ollama|groq|openai   # ollama = fully local & free; groq = free cloud tier
+AI_MODEL=qwen2.5:7b              # or llama-3.3-70b-versatile (groq) / gpt-4o-mini (openai)
 OLLAMA_URL=http://localhost:11434
-OLLAMA_MODEL=llama2
-
-# Server Configuration
+GROQ_API_KEY=gsk_...            # only if AI_PROVIDER=groq
+OPENAI_API_KEY=sk_...           # only if AI_PROVIDER=openai
 PORT=3000
-NODE_ENV=development
-
-# Database
 DATABASE_PATH=./src/data/job-history.db
 ```
 
-### AI Model Configuration
+See [`.env.example`](.env.example) for the full annotated list.
 
-- **OpenAI**: Supports GPT-3.5-turbo and GPT-4 models
-- **Ollama**: Compatible with any Ollama-hosted model (Llama 2, Code Llama, etc.)
+Local Ollama model: `ollama create jobagent-phi3 -f job-agent-model.Modelfile && ollama run jobagent-phi3`.
 
-ollama create jobagent-phi3 -f Modelfile
-ollama run jobagent-phi3
+---
 
-## Data Storage
+## Roadmap
 
-- **SQLite Database**: `src/data/job-history.db`
-  - Resume metadata and extracted text
-  - Application history and status
-  - User profile information
+- [ ] Demo/mock mode so the app runs with no API key (zero-cost public demo)
+- [ ] Optional web dashboard (upload resume + view history in the browser, no extension needed)
+- [ ] Postgres + object storage for multi-user / cloud deployment
+- [ ] Publish the extension to the Chrome Web Store
+- [ ] Broaden ATS coverage and harden multi-step navigation
 
-- **File Storage**: `src/data/resumes/`
-  - Original PDF files with hashed filenames
-  - Secure local storage with no external uploads
-
-## Development
-
-### Building
-
-```bash
-npm run build  # Compile TypeScript to JavaScript
-npm start      # Run production build
-```
-
-### Project Structure
-
-```
-src/
-├── api/           # HTTP route handlers
-├── services/      # Core business logic
-│   ├── ai.service.ts         # AI integration
-│   ├── application-filler.ts # Form automation
-│   ├── job-crawler.ts        # Job data extraction
-│   └── resume.ts             # Resume processing
-├── config/        # Configuration management
-└── data/          # Local data storage
-```
+---
 
 ## Security & Privacy
 
-- **Local-First Design**: All data stored locally, no external data transmission
-- **No Data Collection**: Operates entirely offline except for AI API calls
-- **Secure File Handling**: Hashed filenames prevent enumeration attacks
-- **Browser Automation**: Uses headless Chrome with anti-detection measures
-
-## Limitations & Future Enhancements
-
-- **Form Compatibility**: Currently optimized for common form patterns; may need updates for highly customized forms
-- **Site-Specific Logic**: Generic extraction works for most sites but could be enhanced with site-specific parsers
-- **Multi-Page Forms**: Handles single-page applications but may need extensions for complex multi-step forms
-- **Resume Formats**: Currently supports PDF; could be extended to DOCX and other formats
-
-## Contributing
-
-This is an open-source project focused on improving the job search experience. Contributions for:
-
-- Additional job board integrations
-- Enhanced form detection algorithms
-- New AI model support
-- Improved error handling and edge cases
+- **Local-first** — resumes, structured data, and history stay in local SQLite (`src/data/`); the only external calls are to your chosen AI provider.
+- **Real-session filling** — the extension runs in your own browser; no headless automation or credential handling.
+- **Hashed filenames** — stored resume PDFs use hashed names to prevent enumeration.
+- **Manual submit** — the agent never submits an application for you.
 
 ## License
 
-MIT License - See LICENSE file for details.
+MIT — see [LICENSE](LICENSE).

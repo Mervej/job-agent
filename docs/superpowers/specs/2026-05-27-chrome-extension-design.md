@@ -1,6 +1,6 @@
 # Chrome Extension Job Agent — Design Spec
 **Date:** 2026-05-27  
-**Status:** Approved
+**Status:** execute (task 6 of 6 — all complete)
 
 ---
 
@@ -92,7 +92,7 @@ After all fields on a step are filled and any flagged fields are resolved, the a
 |---|---|
 | AI confidence below threshold (e.g. salary, notice period) | ⚠ Flag for review, pre-fill best guess |
 | Field not derivable from resume (diversity, veteran status) | ⚠ Flag as blank, user fills |
-| File upload (resume, cover letter PDF) | ⚠ Panel shows download link; user clicks to download PDF then attaches manually |
+| File upload (resume, cover letter PDF) | ✓ Auto-uploaded via DataTransfer API (fetch blob from backend, set on input) |
 | CAPTCHA detected | ⛔ Pause, notify user to solve manually |
 | Login wall before apply page | ⛔ Pause, user logs in, then agent resumes |
 
@@ -151,3 +151,42 @@ Add `chrome-extension://*` to the Express CORS allowlist.
 - Multi-resume tailoring per job (user picks from dropdown)
 - Extension publishing to Chrome Web Store (personal use only for now)
 - Mobile or Firefox support
+
+---
+
+## Plan
+
+### Task 1: Backend — Resume API + CORS
+**Files:** `src/api/resumes.ts` (new), `src/index.ts`
+GET /resumes + GET /resumes/:id/file + CORS for chrome-extension://*.
+
+### Task 2: Backend — Field mapping service + endpoint
+**Files:** `src/services/field-mapper.service.ts` (new), `src/api/apply.ts`
+Extract mapping logic from ApplicationFiller, add confidence scores, wire POST /apply/map-fields.
+
+### Task 3: Extension foundation — manifest, background, ATS patterns
+**Files:** `extension/manifest.json`, `extension/utils/ats-patterns.js`, `extension/background.js`
+MV3 scaffold, ATS URL patterns, service worker that relays messages to backend.
+
+### Task 4: Extension field utils — extractor and filler
+**Files:** `extension/utils/field-extractor.js`, `extension/utils/field-filler.js`
+DOM field extraction and field-filling with proper synthetic events.
+
+### Task 5: Extension panel UI
+**Files:** `extension/panel/panel.html`, `extension/panel/panel.css`, `extension/panel/panel.js`
+Side panel iframe with detecting/filling/review states.
+
+### Task 6: Extension content script — orchestration
+**Files:** `extension/content-script.js`
+Form detection, panel injection, fill cycle, auto-advance, stop at review page.
+
+---
+
+## Completed tasks
+
+- **Task 1:** Resume API + CORS — `src/api/resumes.ts`, `src/index.ts`. GET /resumes, GET /resumes/:id/file, CORS for chrome-extension://. 4 tests passing.
+- **Task 2:** Field mapping service + endpoint — `src/services/field-mapper.service.ts`, `src/api/apply.ts`. FieldMapperService with confidence scores, POST /apply/map-fields. 17 tests passing (cumulative).
+- **Task 3:** Extension foundation — `extension/manifest.json`, `extension/utils/ats-patterns.js`, `extension/background.js`. MV3 manifest, 14 ATS URL patterns, service worker with FETCH_RESUMES / MAP_FIELDS / storage message handlers.
+- **Task 4:** Extension field utils — `extension/utils/field-extractor.js`, `extension/utils/field-filler.js`. DOM field extraction with label/question resolution; type-aware filling (text, select, radio, checkbox, combobox, contenteditable) with synthetic events for React/Vue.
+- **Task 5:** Extension panel UI — `extension/panel/panel.html`, `extension/panel/panel.css`, `extension/panel/panel.js`. Three-state panel (detecting/filling/review) driven by postMessage; resume dropdown; editable flagged fields; continue/close actions.
+- **Task 6:** Extension content script — `extension/content-script.js`. Form detection (ATS pattern + DOM heuristic), panel injection, fill cycle, confidence-based flagging, user-edit application, auto-advance via Next button, stops at final review page.

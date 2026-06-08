@@ -55,7 +55,10 @@ Do NOT include explanations — output only the final cover letter.
     //
     const userPrompt = this.buildUserPrompt(jobDescription, userProfile, resumeText);
 
-    return await generateText(systemPrompt, userPrompt);
+    console.log('\n─── COVER LETTER PROMPT ────────────────────────\nSYSTEM:\n' + systemPrompt + '\n\nUSER:\n' + userPrompt + '\n────────────────────────────────────────────────\n');
+    const result = await generateText(systemPrompt, userPrompt);
+    console.log('\n─── COVER LETTER OUTPUT ────────────────────────\n' + result + '\n────────────────────────────────────────────────\n');
+    return result;
   }
 
   private buildUserPrompt(job: JobDescription, user: UserProfile, resumeText: string): string {
@@ -84,8 +87,8 @@ ${user.linkedin ? `- LinkedIn: ${user.linkedin}` : ''}
 ${user.github ? `- GitHub: ${user.github}` : ''}
 ${user.location ? `- Location: ${user.location}` : ''}
 
-### RESUME SUMMARY (TRUNCATED)
-${resumeText.slice(0, 1800)}
+### RESUME
+${resumeText}
 
 ### GUIDANCE
 Generate a polished, personal, job-specific cover letter that clearly connects the candidate’s background to the requirements. Use warm professional language, first-person perspective, and avoid clichés.

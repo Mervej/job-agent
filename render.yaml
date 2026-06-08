@@ -1,0 +1,34 @@
+# Render Blueprint — free-tier deploy of the Job Agent backend.
+# Docs: https://render.com/docs/blueprint-spec
+#
+# After pushing this repo to GitHub:
+#   Render Dashboard → New → Blueprint → pick this repo → Apply.
+# Render reads this file and provisions the service. You'll be prompted for
+# the secret env vars marked `sync: false` (set GROQ_API_KEY there).
+
+services:
+  - type: web
+    name: job-agent-backend
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      # Skip Playwright's ~400MB browser download — the deployed backend only
+      # serves the API; the headless filler isn't used in the cloud.
+      - key: PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD
+        value: "1"
+      # Use Groq (free tier). Set GROQ_API_KEY in the Render dashboard.
+      - key: AI_PROVIDER
+        value: groq
+      - key: AI_MODEL
+        value: llama-3.3-70b-versatile
+      - key: GROQ_API_KEY
+        sync: false
+      # Disable the Playwright/Stagehand apply path (no browser in the cloud).
+      - key: USE_STAGEHAND
+        value: "false"
+      # NODE_ENV is intentionally left unset so the build installs devDeps
+      # (TypeScript) and the app reads config from these env vars, not a file.
