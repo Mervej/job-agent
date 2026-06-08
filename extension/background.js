@@ -1,4 +1,5 @@
-const BACKEND_URL = 'http://localhost:3000';
+// Deployed backend. For local development, swap to 'http://localhost:3000'.
+const BACKEND_URL = 'https://job-agent-backend-jg3v.onrender.com';
 
 // ─── Message handler ──────────────────────────────────────────────────────────
 

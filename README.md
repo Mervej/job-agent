@@ -10,6 +10,8 @@
 ![OpenAI](https://img.shields.io/badge/OpenAI-412991?logo=openai&logoColor=white)
 ![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)
 
+**Live backend:** [`job-agent-backend-jg3v.onrender.com/health`](https://job-agent-backend-jg3v.onrender.com/health) (free tier — first request may take ~50s to wake)
+
 Job Agent is a local-first assistant that takes the tedium out of job applications. Upload your resume once; then on any job application page, a Chrome extension detects the form, asks an AI backend to map your resume onto the fields, and fills them in — flagging anything it isn't confident about for you to review. It runs in your own browser session, so there's no headless automation and no anti-bot detection. **It never submits for you** — you always review and click submit yourself.
 
 ---
@@ -117,7 +119,7 @@ curl -X POST -F "file=@your-resume.pdf" http://localhost:3000/upload
 
 ## Deploy (free)
 
-The backend deploys to [Render](https://render.com)'s free tier with no credit card — the repo ships a [`render.yaml`](render.yaml) Blueprint, a `/health` probe, and a compiled-JS start command. Push to GitHub, create a Render Blueprint, paste a free [Groq](https://console.groq.com) API key, and you get a public URL.
+The backend runs live on [Render](https://render.com)'s free tier at **[job-agent-backend-jg3v.onrender.com](https://job-agent-backend-jg3v.onrender.com/health)** — no credit card. The repo ships a [`render.yaml`](render.yaml) Blueprint, a `/health` probe, and a compiled-JS start command. To deploy your own: push to GitHub, create a Render Blueprint, paste a free [Groq](https://console.groq.com) API key, and you get a public URL.
 
 Full walkthrough: **[`docs/DEPLOY.md`](docs/DEPLOY.md)**.
 
