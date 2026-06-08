@@ -11,7 +11,9 @@ services:
     name: job-agent-backend
     runtime: node
     plan: free
-    buildCommand: npm install && npm run build
+    # --include=dev guarantees TypeScript + @types install even if the host
+    # sets NODE_ENV=production. legacy-peer-deps is set via .npmrc.
+    buildCommand: npm install --include=dev && npm run build
     startCommand: npm start
     healthCheckPath: /health
     autoDeploy: true
