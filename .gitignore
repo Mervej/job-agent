@@ -10,3 +10,6 @@ src/data/
 
 # Local Claude/agent tooling state
 .superpowers/
+
+# Extension release zip (build artifact — attached to GitHub Releases)
+job-agent-extension-*.zip

@@ -111,7 +111,10 @@ npm run dev
 curl -X POST -F "file=@your-resume.pdf" http://localhost:3000/upload
 ```
 
-**Load the extension:** `chrome://extensions` → enable Developer mode → **Load unpacked** → select `extension/`. Then open a job application page — the side panel appears automatically.
+**Load the extension (two options):**
+
+- **From release .zip** — go to [Releases](../../releases), download `job-agent-extension-v*.zip`, unzip it, then `chrome://extensions` → Developer mode → **Load unpacked** → select the unzipped folder.
+- **From source** — clone the repo, then `chrome://extensions` → Developer mode → **Load unpacked** → select the `extension/` folder directly.
 
 > No live form handy? Open one of the bundled sample forms in `demo-html/` (e.g. `demo-job-page.html`) and run the extension against it.
 
