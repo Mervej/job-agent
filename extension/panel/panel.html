@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Job Agent</title>
+  <link rel="stylesheet" href="panel.css" />
+</head>
+<body>
+  <!-- Header -->
+  <div class="header">
+    <div class="header-title">
+      <span class="logo">🤖</span>
+      <span>Job Agent</span>
+    </div>
+    <button class="close-btn" id="closeBtn" title="Close panel">✕</button>
+  </div>
+
+  <!-- Job info -->
+  <div class="section" id="jobInfo">
+    <div class="label">DETECTED JOB</div>
+    <div class="job-title" id="jobTitle">Scanning...</div>
+    <div class="job-company" id="jobCompany"></div>
+  </div>
+
+  <!-- Resume picker -->
+  <div class="section" id="resumeSection">
+    <div class="label">RESUME</div>
+    <select class="resume-select" id="resumeSelect">
+      <option value="">Loading resumes...</option>
+    </select>
+  </div>
+
+  <!-- Status / progress -->
+  <div class="section" id="statusSection">
+    <div class="status-row" id="statusRow">
+      <span class="spinner" id="spinner"></span>
+      <span id="statusText">Initialising...</span>
+    </div>
+    <div class="progress-bar-wrap" id="progressWrap" style="display:none">
+      <div class="progress-meta">
+        <span id="progressLabel"></span>
+        <span id="progressCount"></span>
+      </div>
+      <div class="progress-track">
+        <div class="progress-fill" id="progressFill"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Field list (filling state) -->
+  <div class="section" id="fieldListSection" style="display:none">
+    <div class="label">FIELDS</div>
+    <div id="fieldList"></div>
+  </div>
+
+  <!-- Review state: flagged fields -->
+  <div id="reviewSection" style="display:none">
+    <div class="review-banner">
+      <div class="review-banner-title" id="reviewBannerTitle">⚠ Fields need your input</div>
+      <div class="review-banner-sub">Review below, then continue</div>
+    </div>
+    <div class="section">
+      <div class="label">NEEDS REVIEW</div>
+      <div id="flaggedFieldList"></div>
+    </div>
+  </div>
+
+  <!-- CAPTCHA / error notice -->
+  <div class="notice notice-error" id="errorNotice" style="display:none">
+    <span id="errorText"></span>
+  </div>
+
+  <!-- Actions -->
+  <div class="actions" id="actions" style="display:none">
+    <button class="btn-primary" id="continueBtn">Continue to Next Step →</button>
+  </div>
+
+  <!-- Done state -->
+  <div class="notice notice-done" id="doneNotice" style="display:none">
+    ✅ All steps filled. Review the form and submit when ready.
+  </div>
+
+  <script src="panel.js"></script>
+</body>
+</html>

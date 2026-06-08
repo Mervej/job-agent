@@ -316,7 +316,7 @@ export class HtmlFormExtractorAgent {
 
       let response: string;
       try {
-        response = await generateText(BATCH_SYSTEM_PROMPT, userPrompt, 8000);
+        response = await generateText(BATCH_SYSTEM_PROMPT, userPrompt, 2500);
       } catch (err) {
         console.log(`[HtmlExtractor] generateText error on attempt ${attempt}:`, err);
         continue;
