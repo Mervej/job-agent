@@ -1,8 +1,6 @@
 import './loadEnv'; // must be first — loads .env.dev or .env before any service module runs
 import express from 'express';
 import cors from 'cors';
-import path from 'path';
-import fs from 'fs';
 import uploadRouter from './api/upload';
 import genRouter from './api/generate';
 import applyRouter from './api/apply';
@@ -39,12 +37,6 @@ app.use('/generate', requireAuth, genRouter);
 app.use('/apply', requireAuth, applyRouter);
 app.use('/resumes', requireAuth, resumesRouter);
 app.use('/profile', requireAuth, profileRouter);
-
-const webDist = path.join(__dirname, '..', 'web', 'dist');
-if (fs.existsSync(webDist)) {
-  app.use(express.static(webDist));
-  app.get('*', (_req, res) => res.sendFile(path.join(webDist, 'index.html')));
-}
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
