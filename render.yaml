@@ -51,4 +51,8 @@ services:
         fromService:
           name: job-agent-backend
           type: web
-          property: host
+          property: url
+      - key: VITE_SUPABASE_URL
+        value: https://mkokkgtjyanotnctguqe.supabase.co
+      - key: VITE_SUPABASE_ANON_KEY
+        sync: false
