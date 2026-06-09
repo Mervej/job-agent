@@ -132,7 +132,7 @@ Full walkthrough: **[`docs/DEPLOY.md`](docs/DEPLOY.md)**.
 
 | Endpoint | Purpose |
 |---|---|
-| `POST /upload` | Upload + parse a PDF resume |
+| `POST /upload` | Upload a PDF resume; AI-parses it into structured profile fields (contact info, experience with dates, education, skills, summary) |
 | `GET /resumes` | List resumes (powers the extension dropdown) |
 | `GET /resumes/:id/file` | Download a resume PDF |
 | `POST /generate/cover-letter` | Generate an AI cover letter |

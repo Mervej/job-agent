@@ -3,7 +3,8 @@
 const $ = (id) => document.getElementById(id);
 
 let resumes = [];
-let flaggedEdits = {}; // selector → edited value
+let flaggedEdits = {};
+let settingsOpen = false;
 
 // ─── postMessage listener ────────────────────────────────────────────────────
 
@@ -20,6 +21,9 @@ window.addEventListener('message', (event) => {
     case 'ALL_DONE': return onAllDone();
     case 'ERROR': return onError(msg.message);
     case 'STATUS': return setStatus(msg.text, msg.showSpinner !== false);
+    case 'NO_API_KEY': return onNoApiKey();
+    case 'API_KEY_LOADED': return onApiKeyLoaded(msg.apiKey);
+    case 'API_KEY_SAVED': return onApiKeySaved();
   }
 });
 
@@ -144,11 +148,72 @@ $('closeBtn').addEventListener('click', () => {
   window.parent.postMessage({ type: 'CLOSE' }, '*');
 });
 
+// ─── Settings ─────────────────────────────────────────────────────────────────
+
+$('settingsBtn').addEventListener('click', () => {
+  settingsOpen = !settingsOpen;
+  $('settingsSection').style.display = settingsOpen ? '' : 'none';
+  $('settingsStatus').textContent = '';
+  if (settingsOpen) {
+    window.parent.postMessage({ type: 'GET_API_KEY' }, '*');
+  }
+});
+
+$('cancelSettingsBtn').addEventListener('click', () => {
+  settingsOpen = false;
+  $('settingsSection').style.display = 'none';
+});
+
+$('saveApiKeyBtn').addEventListener('click', () => {
+  const key = $('apiKeyInput').value.trim();
+  if (!key) { $('settingsStatus').textContent = 'Please enter an API key.'; return; }
+  $('settingsStatus').textContent = 'Saving…';
+  $('saveApiKeyBtn').disabled = true;
+  window.parent.postMessage({ type: 'SAVE_API_KEY', apiKey: key }, '*');
+});
+
+function onNoApiKey() {
+  settingsOpen = true;
+  $('settingsSection').style.display = '';
+  $('settingsStatus').textContent = 'Paste your API key from the Job Agent dashboard to get started.';
+  setStatus('Connect your account to continue.', false);
+}
+
+function onApiKeyLoaded(apiKey) {
+  if (apiKey) {
+    $('apiKeyInput').value = apiKey;
+    $('settingsStatus').textContent = 'Key saved. You can update it here.';
+  } else {
+    $('apiKeyInput').value = '';
+    $('settingsStatus').textContent = '';
+  }
+}
+
+function onApiKeySaved() {
+  $('settingsStatus').textContent = 'Saved! Reconnecting…';
+  $('saveApiKeyBtn').disabled = false;
+  setTimeout(() => {
+    settingsOpen = false;
+    $('settingsSection').style.display = 'none';
+  }, 1200);
+}
+
+// Request API key on startup to prefill settings if it opens
+window.parent.postMessage({ type: 'GET_API_KEY' }, '*');
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+$('rescanBtn').addEventListener('click', () => {
+  $('rescanBtn').style.display = 'none';
+  $('errorNotice').style.display = 'none';
+  window.parent.postMessage({ type: 'RESCAN' }, '*');
+});
 
 function setStatus(text, showSpinner = true) {
   $('statusText').textContent = text;
   $('spinner').className = showSpinner ? 'spinner' : 'spinner hidden';
+  // Show rescan button only when idle (no spinner)
+  $('rescanBtn').style.display = showSpinner ? 'none' : '';
 }
 
 function escapeHtml(str) {

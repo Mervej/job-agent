@@ -1,44 +1,59 @@
-// Deployed backend. For local development, swap to 'http://localhost:3000'.
-const BACKEND_URL = 'https://job-agent-backend-jg3v.onrender.com';
+const PROD_URL = 'https://job-agent-backend-jg3v.onrender.com';
+const LOCAL_URL = 'http://localhost:3000';
+
+// Resolved once on startup — all handlers await this before firing
+const backendReady = (async () => {
+  try {
+    const res = await fetch(`${LOCAL_URL}/health`, { signal: AbortSignal.timeout(2000) });
+    if (res.ok) {
+      console.log('[Job Agent] Using local backend');
+      return LOCAL_URL;
+    }
+  } catch {}
+  console.log('[Job Agent] Using deployed backend');
+  return PROD_URL;
+})();
+
+// ─── Auth ─────────────────────────────────────────────────────────────────────
+
+async function authHeaders(extra = {}) {
+  const { apiKey } = await chrome.storage.local.get('apiKey');
+  return {
+    'Content-Type': 'application/json',
+    ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+    ...extra,
+  };
+}
 
 // ─── Message handler ──────────────────────────────────────────────────────────
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.type === 'FETCH_RESUMES') {
-    handleFetchResumes(sendResponse);
-    return true; // keep channel open for async response
-  }
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  const handlers = {
+    FETCH_RESUMES:       () => handleFetchResumes(sendResponse),
+    MAP_FIELDS:          () => handleMapFields(message.payload, sendResponse),
+    FETCH_RESUME_FILE:   () => handleFetchResumeFile(message.resumeId, sendResponse),
+    FETCH_COVER_LETTER_PDF: () => handleFetchCoverLetterPdf(message.text, sendResponse),
+    MAP_ENTRY_FIELDS:    () => handleMapEntryFields(message.payload, sendResponse),
+    SAVE_API_KEY: () => {
+      chrome.storage.local.set({ apiKey: message.apiKey }, () => sendResponse({ ok: true }));
+    },
+    GET_API_KEY: () => {
+      chrome.storage.local.get('apiKey', (d) => sendResponse({ apiKey: d.apiKey ?? null }));
+      return true;
+    },
+    SAVE_RESUME_ID: () => {
+      chrome.storage.local.set({ activeResumeId: message.resumeId });
+      sendResponse({ ok: true });
+      return false;
+    },
+    GET_RESUME_ID: () => {
+      chrome.storage.local.get('activeResumeId', (d) => sendResponse({ resumeId: d.activeResumeId ?? null }));
+      return true;
+    },
+  };
 
-  if (message.type === 'MAP_FIELDS') {
-    handleMapFields(message.payload, sendResponse);
-    return true;
-  }
-
-  if (message.type === 'FETCH_RESUME_FILE') {
-    handleFetchResumeFile(message.resumeId, sendResponse);
-    return true;
-  }
-
-  if (message.type === 'FETCH_COVER_LETTER_PDF') {
-    handleFetchCoverLetterPdf(message.text, sendResponse);
-    return true;
-  }
-
-  if (message.type === 'MAP_ENTRY_FIELDS') {
-    handleMapEntryFields(message.payload, sendResponse);
-    return true;
-  }
-
-  if (message.type === 'SAVE_RESUME_ID') {
-    chrome.storage.local.set({ activeResumeId: message.resumeId });
-    sendResponse({ ok: true });
-    return false;
-  }
-
-  if (message.type === 'GET_RESUME_ID') {
-    chrome.storage.local.get('activeResumeId', (data) => {
-      sendResponse({ resumeId: data.activeResumeId ?? null });
-    });
+  if (handlers[message.type]) {
+    handlers[message.type]();
     return true;
   }
 });
@@ -47,10 +62,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 async function handleFetchResumes(sendResponse) {
   try {
-    const res = await fetch(`${BACKEND_URL}/resumes`);
+    const url = await backendReady;
+    const res = await fetch(`${url}/resumes`, { headers: await authHeaders() });
+    if (res.status === 401) {
+      sendResponse({ ok: false, error: 'No API key set. Open extension settings and paste your key.' });
+      return;
+    }
     if (!res.ok) throw new Error(`Backend returned ${res.status}`);
-    const resumes = await res.json();
-    sendResponse({ ok: true, resumes });
+    const data = await res.json();
+    sendResponse({ ok: true, resumes: data.resumes ?? data });
   } catch (err) {
     sendResponse({ ok: false, error: err.message });
   }
@@ -58,11 +78,14 @@ async function handleFetchResumes(sendResponse) {
 
 async function handleFetchResumeFile(resumeId, sendResponse) {
   try {
-    const res = await fetch(`${BACKEND_URL}/resumes/${resumeId}/file`);
+    const url = await backendReady;
+    const { apiKey } = await chrome.storage.local.get('apiKey');
+    const res = await fetch(`${url}/resumes/${resumeId}/file`, {
+      headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
+    });
     if (!res.ok) throw new Error(`Backend returned ${res.status}`);
     const buffer = await res.arrayBuffer();
-    const base64 = arrayBufferToBase64(buffer);
-    sendResponse({ ok: true, base64, filename: `resume-${resumeId}.pdf` });
+    sendResponse({ ok: true, base64: arrayBufferToBase64(buffer), filename: `resume-${resumeId}.pdf` });
   } catch (err) {
     sendResponse({ ok: false, error: err.message });
   }
@@ -70,9 +93,10 @@ async function handleFetchResumeFile(resumeId, sendResponse) {
 
 async function handleMapEntryFields({ fields, entryType, entryData, resumeText }, sendResponse) {
   try {
-    const res = await fetch(`${BACKEND_URL}/apply/map-entry-fields`, {
+    const url = await backendReady;
+    const res = await fetch(`${url}/apply/map-entry-fields`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: await authHeaders(),
       body: JSON.stringify({ fields, entryType, entryData, resumeText }),
     });
     if (!res.ok) throw new Error(`Backend returned ${res.status}`);
@@ -85,15 +109,34 @@ async function handleMapEntryFields({ fields, entryType, entryData, resumeText }
 
 async function handleFetchCoverLetterPdf(text, sendResponse) {
   try {
-    const res = await fetch(`${BACKEND_URL}/apply/cover-letter-pdf`, {
+    const url = await backendReady;
+    const res = await fetch(`${url}/apply/cover-letter-pdf`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: await authHeaders(),
       body: JSON.stringify({ text }),
     });
     if (!res.ok) throw new Error(`Backend returned ${res.status}`);
     const buffer = await res.arrayBuffer();
-    const base64 = arrayBufferToBase64(buffer);
-    sendResponse({ ok: true, base64, filename: 'cover-letter.pdf' });
+    sendResponse({ ok: true, base64: arrayBufferToBase64(buffer), filename: 'cover-letter.pdf' });
+  } catch (err) {
+    sendResponse({ ok: false, error: err.message });
+  }
+}
+
+async function handleMapFields({ fields, resumeId, jobUrl }, sendResponse) {
+  try {
+    const url = await backendReady;
+    const res = await fetch(`${url}/apply/map-fields`, {
+      method: 'POST',
+      headers: await authHeaders(),
+      body: JSON.stringify({ fields, resumeId, jobUrl }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || `Backend returned ${res.status}`);
+    }
+    const data = await res.json();
+    sendResponse({ ok: true, ...data });
   } catch (err) {
     sendResponse({ ok: false, error: err.message });
   }
@@ -107,22 +150,4 @@ function arrayBufferToBase64(buffer) {
     binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
   }
   return btoa(binary);
-}
-
-async function handleMapFields({ fields, resumeId, jobUrl }, sendResponse) {
-  try {
-    const res = await fetch(`${BACKEND_URL}/apply/map-fields`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fields, resumeId, jobUrl }),
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw new Error(body.error || `Backend returned ${res.status}`);
-    }
-    const data = await res.json();
-    sendResponse({ ok: true, ...data });
-  } catch (err) {
-    sendResponse({ ok: false, error: err.message });
-  }
 }

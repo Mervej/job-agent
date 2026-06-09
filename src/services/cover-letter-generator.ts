@@ -55,9 +55,7 @@ Do NOT include explanations — output only the final cover letter.
     //
     const userPrompt = this.buildUserPrompt(jobDescription, userProfile, resumeText);
 
-    console.log('\n─── COVER LETTER PROMPT ────────────────────────\nSYSTEM:\n' + systemPrompt + '\n\nUSER:\n' + userPrompt + '\n────────────────────────────────────────────────\n');
     const result = await generateText(systemPrompt, userPrompt);
-    console.log('\n─── COVER LETTER OUTPUT ────────────────────────\n' + result + '\n────────────────────────────────────────────────\n');
     return result;
   }
 

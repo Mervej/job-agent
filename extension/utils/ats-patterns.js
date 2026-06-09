@@ -6,14 +6,17 @@ const ATS_PATTERNS = [
 
   // Greenhouse
   /boards\.greenhouse\.io\/.+\/jobs\//,
+  /job-boards\.greenhouse\.io\//,
   /greenhouse\.io\/applications\//,
+  /greenhouse\.io\/embed\/job_app/,
 
   // Lever
   /jobs\.lever\.co\/.+\/apply/,
 
-  // Ashby
+  // Ashby (hosted + embedded via ashby_jid query param on company career pages)
   /app\.ashbyhq\.com\/.*\/application/,
   /jobs\.ashbyhq\.com\//,
+  /[?&]ashby_jid=/,
 
   // SmartRecruiters
   /careers\.smartrecruiters\.com\/.+\/apply/,

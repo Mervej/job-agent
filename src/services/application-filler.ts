@@ -1612,15 +1612,15 @@ ${resumeContext}`;
           aiPrompt += `\n\nAvailable options (respond with ONLY one of these, exactly as written): ${optionList}`;
         }
       } else if (!mappedData && !needsAI) {
-        // No options, no value yet — generic text fallback
-        if (questionForFallback.includes('?')) {
+        // No options, no value yet — generic text fallback for any labelled field
+        if (questionForFallback) {
           needsAI = true;
           aiPrompt = `You are the candidate filling out a job application.
 
 Question:
 ${questionForFallback}
 
-Write a concise answer in first person, grounded ONLY in the resume below.
+Write a concise answer in first person, grounded ONLY in the resume below. If it is a yes/no question answer only "Yes" or "No". If it asks for a number answer only the number. Keep answers brief (1-3 sentences max).
 
 Resume:
 ${resumeContext}`;

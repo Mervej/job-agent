@@ -15,6 +15,7 @@ function extractFields(doc = document) {
   ].join(', ');
 
   const seen = new Set();
+  const seenSelectors = new Set();
   const fields = [];
 
   doc.querySelectorAll(FIELD_SELECTOR).forEach((el, index) => {
@@ -56,6 +57,13 @@ function extractFields(doc = document) {
       options: getOptions(el, tag, inputType),
     };
 
+    // Radio groups: deduplicate by selector so the backend only sees one field per group.
+    // All radios in a group share the same name-based selector; only keep the first.
+    if (inputType === 'radio') {
+      if (seenSelectors.has(field.selector)) return;
+      seenSelectors.add(field.selector);
+    }
+
     fields.push(field);
   });
 
@@ -85,8 +93,14 @@ function makeSelector(el, index) {
   const placeholder = el.placeholder;
   const aria = el.getAttribute('aria-label');
 
+  // Radio buttons: always use name-based selector so the filler can scan the whole group.
+  // id-based selectors only identify one option and break fillRadio's group lookup.
+  if (type === 'radio' && name) return `${tag}[type="radio"][name="${name}"]`;
+
   if (id) return `${tag}[id="${id}"]`;
-  if (name && type) return `${tag}[type="${type}"][name="${name}"]`;
+  // Only use [type] for <input> — textarea/select have a .type JS property but no type HTML attribute,
+  // so textarea[type="textarea"] would match nothing in the DOM.
+  if (name && tag === 'input' && type) return `${tag}[type="${type}"][name="${name}"]`;
   if (name) return `${tag}[name="${name}"]`;
   if (aria) return `${tag}[aria-label="${aria}"]`;
   if (placeholder) return `${tag}[placeholder="${placeholder}"]`;
@@ -171,7 +185,12 @@ function getOptions(el, tag, inputType) {
     return Array.from(el.options).map(opt => ({ value: opt.value, text: (opt.textContent || '').trim() }));
   }
   if (inputType === 'radio' && el.name) {
-    const radios = document.querySelectorAll(`input[type="radio"][name="${el.name}"]`);
+    let radios;
+    try {
+      radios = document.querySelectorAll(`input[type="radio"][name="${el.name}"]`);
+    } catch (_) {
+      radios = [...document.querySelectorAll('input[type="radio"]')].filter(r => r.name === el.name);
+    }
     return Array.from(radios).map(r => ({ value: r.value, text: getLabel(r) || r.value }));
   }
   return undefined;

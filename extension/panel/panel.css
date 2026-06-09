@@ -23,11 +23,29 @@ body {
 }
 .header-title { font-weight: 700; font-size: 14px; display: flex; align-items: center; gap: 6px; }
 .logo { font-size: 16px; }
-.close-btn {
+.header-actions { display: flex; align-items: center; gap: 4px; }
+.close-btn, .icon-btn {
   background: none; border: none; color: rgba(255,255,255,0.8);
   cursor: pointer; font-size: 14px; padding: 2px 6px; border-radius: 4px;
 }
-.close-btn:hover { background: rgba(255,255,255,0.15); color: #fff; }
+.close-btn:hover, .icon-btn:hover { background: rgba(255,255,255,0.15); color: #fff; }
+
+/* ─── Settings ──────────────────────────────────────────────── */
+.settings-section { background: #f8fafc; }
+.settings-hint { font-size: 11px; color: #64748b; margin-bottom: 8px; line-height: 1.5; }
+.settings-input {
+  width: 100%; padding: 7px 9px; border: 1px solid #e2e8f0; border-radius: 6px;
+  font-size: 12px; font-family: monospace; background: #fff; color: #1e293b;
+}
+.settings-input:focus { outline: none; border-color: #6366f1; }
+.settings-actions { display: flex; gap: 8px; margin-top: 8px; }
+.settings-actions .btn-primary { flex: 1; padding: 7px; font-size: 12px; }
+.btn-secondary {
+  flex: 0 0 auto; background: none; border: 1px solid #e2e8f0; border-radius: 6px;
+  padding: 7px 12px; font-size: 12px; color: #64748b; cursor: pointer;
+}
+.btn-secondary:hover { background: #f1f5f9; }
+.settings-status { font-size: 11px; color: #6366f1; margin-top: 6px; min-height: 16px; }
 
 /* ─── Sections ─────────────────────────────────────────────── */
 .section { padding: 10px 14px; border-bottom: 1px solid #e2e8f0; }
@@ -47,6 +65,11 @@ body {
 
 /* ─── Status row ───────────────────────────────────────────── */
 .status-row { display: flex; align-items: center; gap: 8px; color: #6366f1; min-height: 24px; }
+.rescan-btn {
+  margin-left: auto; background: none; border: 1px solid #e2e8f0; border-radius: 4px;
+  padding: 2px 7px; font-size: 13px; color: #6366f1; cursor: pointer; line-height: 1;
+}
+.rescan-btn:hover { background: #eef2ff; }
 .spinner {
   display: inline-block; width: 14px; height: 14px;
   border: 2px solid #e0e7ff; border-top-color: #6366f1;

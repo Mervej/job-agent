@@ -28,12 +28,14 @@ async function fillField(selector, value, elementType, inputType, isCombobox) {
 // ─── Field-type fillers ───────────────────────────────────────────────────────
 
 function fillText(el, value) {
-  // React/Vue track value via native input descriptor
-  const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set
-    || Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
+  // Use the correct prototype — calling HTMLInputElement's setter on a <textarea> throws TypeError
+  const proto = el instanceof HTMLTextAreaElement
+    ? window.HTMLTextAreaElement.prototype
+    : window.HTMLInputElement.prototype;
+  const nativeSetter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
 
-  if (nativeInputValueSetter) {
-    nativeInputValueSetter.call(el, value);
+  if (nativeSetter) {
+    nativeSetter.call(el, value);
   } else {
     el.value = value;
   }
@@ -45,12 +47,19 @@ function fillText(el, value) {
 
 function fillSelect(el, value) {
   const lower = value.toLowerCase();
+  const nativeSelectSetter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')?.set;
+
+  const setVal = (optValue) => {
+    if (nativeSelectSetter) nativeSelectSetter.call(el, optValue);
+    else el.value = optValue;
+    dispatch(el, 'input');
+    dispatch(el, 'change');
+  };
 
   // Try exact value match first
   for (const opt of el.options) {
     if (opt.value.toLowerCase() === lower || opt.text.toLowerCase() === lower) {
-      el.value = opt.value;
-      dispatch(el, 'change');
+      setVal(opt.value);
       return true;
     }
   }
@@ -58,8 +67,7 @@ function fillSelect(el, value) {
   // Try partial text match
   for (const opt of el.options) {
     if (opt.text.toLowerCase().includes(lower) || lower.includes(opt.text.toLowerCase())) {
-      el.value = opt.value;
-      dispatch(el, 'change');
+      setVal(opt.value);
       return true;
     }
   }
@@ -77,11 +85,28 @@ function fillCheckbox(el, value) {
 }
 
 function fillRadio(selectorBase, value) {
-  // Find the radio with matching label or value
   const nameMatch = selectorBase.match(/\[name="([^"]+)"\]/);
-  if (!nameMatch) return false;
 
-  const radios = document.querySelectorAll(`input[type="radio"][name="${nameMatch[1]}"]`);
+  let groupName;
+  if (nameMatch) {
+    groupName = nameMatch[1];
+  } else {
+    const anchor = document.querySelector(selectorBase);
+    if (!anchor || !anchor.name) return false;
+    groupName = anchor.name;
+  }
+
+  // Try CSS selector first; fall back to scanning all radios by .name property
+  // (the CSS selector can throw if the name contains special characters)
+  let radios;
+  try {
+    radios = document.querySelectorAll(`input[type="radio"][name="${groupName}"]`);
+  } catch (_) {
+    radios = [...document.querySelectorAll('input[type="radio"]')].filter(r => r.name === groupName);
+  }
+
+  if (!radios.length) return false;
+
   const lower = value.toLowerCase();
 
   for (const radio of radios) {
@@ -92,7 +117,12 @@ function fillRadio(selectorBase, value) {
       label.toLowerCase().includes(lower) ||
       lower.includes(label.toLowerCase())
     ) {
+      // Use native checked setter to ensure React's internal state syncs
+      const nativeCheckedSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'checked')?.set;
+      if (nativeCheckedSetter) nativeCheckedSetter.call(radio, true);
+      else radio.checked = true;
       radio.click();
+      dispatch(radio, 'input');
       dispatch(radio, 'change');
       return true;
     }

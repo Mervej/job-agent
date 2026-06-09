@@ -73,30 +73,33 @@ function injectPanel() {
 async function startFlow() {
   const { jobTitle, jobCompany } = detectJobInfo();
 
-  // Fetch resumes and last-used resumeId from background
+  // Gate 1: API key must exist before hitting the backend
+  const { apiKey } = await sendToBackground({ type: 'GET_API_KEY' });
+  if (!apiKey) {
+    postToPanel({ type: 'INIT', jobTitle, jobCompany, resumes: [], activeResumeId: null });
+    postToPanel({ type: 'NO_API_KEY' });
+    return;
+  }
+
+  // Gate 2: Fetch resumes (auth header is now included automatically)
   const [resumesResp, storedId] = await Promise.all([
     sendToBackground({ type: 'FETCH_RESUMES' }),
     sendToBackground({ type: 'GET_RESUME_ID' }),
   ]);
 
   if (!resumesResp.ok) {
-    postToPanel({ type: 'ERROR', message: 'Cannot reach backend. Is the server running?' });
+    postToPanel({ type: 'INIT', jobTitle, jobCompany, resumes: [], activeResumeId: null });
+    postToPanel({ type: 'ERROR', message: resumesResp.error || 'Backend error. Check the server.' });
     return;
   }
 
   const resumes = resumesResp.resumes || [];
   activeResumeId = storedId.resumeId ?? resumes[0]?.id ?? null;
 
-  postToPanel({
-    type: 'INIT',
-    jobTitle,
-    jobCompany,
-    resumes,
-    activeResumeId,
-  });
+  postToPanel({ type: 'INIT', jobTitle, jobCompany, resumes, activeResumeId });
 
   if (!activeResumeId) {
-    postToPanel({ type: 'ERROR', message: 'No resume found. Upload one first.' });
+    postToPanel({ type: 'ERROR', message: 'No resume found. Upload one at the Job Agent dashboard.' });
     return;
   }
 
@@ -122,6 +125,20 @@ async function runFillCycle() {
 
     const fields = await waitForFields();
     if (fields.length === 0) {
+      // Form is likely embedded in a cross-origin iframe — redirect to it directly
+      const atsFrame = [...document.querySelectorAll('iframe')].find(f => {
+        const src = f.src || '';
+        return src.includes('ashbyhq.com') ||
+               src.includes('greenhouse.io') ||
+               src.includes('lever.co') ||
+               src.includes('myworkdayjobs.com') ||
+               src.includes('smartrecruiters.com');
+      });
+      if (atsFrame?.src) {
+        postToPanel({ type: 'STATUS', text: 'Opening application form…', showSpinner: true });
+        setTimeout(() => { window.location.href = atsFrame.src; }, 600);
+        return;
+      }
       postToPanel({ type: 'STATUS', text: 'No form fields found on this page.', showSpinner: false });
       isFilling = false;
       return;
@@ -218,7 +235,7 @@ async function runFillCycle() {
       if (confidence < CONFIDENCE_THRESHOLD) {
         flagged.push({
           selector,
-          label: fieldMeta.label || fieldMeta.fieldName || selector,
+          label: fieldMeta.questionText || fieldMeta.label || selector,
           value,
           isTextarea: fieldMeta.elementType === 'textarea' || fieldMeta.elementType === 'div',
         });
@@ -226,7 +243,7 @@ async function runFillCycle() {
         postToPanel({
           type: 'FIELD_FILLED',
           selector,
-          label: fieldMeta.label || fieldMeta.fieldName || selector,
+          label: fieldMeta.questionText || fieldMeta.label || selector,
           value: '⚠ needs review',
           filled: ++filled,
           total: mappings.length,
@@ -241,7 +258,7 @@ async function runFillCycle() {
       postToPanel({
         type: 'FIELD_FILLED',
         selector,
-        label: fieldMeta.label || fieldMeta.fieldName || selector,
+        label: fieldMeta.questionText || fieldMeta.label || selector,
         value: ok ? value : '✗ failed',
         filled: ++filled,
         total: mappings.length,
@@ -579,19 +596,46 @@ async function onPanelMessage(event) {
     sendToBackground({ type: 'SAVE_RESUME_ID', resumeId: msg.resumeId });
   }
 
+  if (msg.type === 'GET_API_KEY') {
+    const resp = await sendToBackground({ type: 'GET_API_KEY' });
+    postToPanel({ type: 'API_KEY_LOADED', apiKey: resp.apiKey });
+  }
+
+  if (msg.type === 'SAVE_API_KEY') {
+    await sendToBackground({ type: 'SAVE_API_KEY', apiKey: msg.apiKey });
+    postToPanel({ type: 'API_KEY_SAVED' });
+    isFilling = false;
+    await startFlow();
+  }
+
   if (msg.type === 'CONTINUE') {
+    console.log('[JobAgent] CONTINUE received, edits:', msg.edits);
     if (msg.edits) {
       for (const [selector, value] of Object.entries(msg.edits)) {
-        if (!value) continue;
-        // Use stored metadata — avoids re-extracting after page re-renders
+        if (!value) { console.log('[JobAgent] skipping empty value for', selector); continue; }
         const fieldMeta = _flaggedFieldMeta[selector] || {};
-        // fillField now checks the actual element type — no need to special-case here
-        await fillField(selector, value, fieldMeta.elementType, fieldMeta.inputType, fieldMeta.isCombobox);
+        const el = document.querySelector(selector);
+        console.log('[JobAgent] filling', selector, '=', value, '| el found:', !!el, '| inputType:', fieldMeta.inputType, el?.type);
+        const ok = await fillField(selector, value, fieldMeta.elementType, fieldMeta.inputType, fieldMeta.isCombobox);
+        console.log('[JobAgent] fill result:', ok ? '✓' : '✗ FAILED', 'for', selector);
+        postToPanel({
+          type: 'FIELD_FILLED',
+          selector,
+          label: fieldMeta.questionText || fieldMeta.label || selector,
+          value: ok ? value : '✗ fill failed',
+          filled: 0,
+          total: 0,
+        });
         await sleep(FILL_DELAY_MS);
       }
     }
     _flaggedFieldMeta = {};
     await advanceOrFinish();
+  }
+
+  if (msg.type === 'RESCAN') {
+    isFilling = false;
+    await runFillCycle();
   }
 
   if (msg.type === 'CLOSE') {

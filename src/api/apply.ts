@@ -4,14 +4,10 @@ import { CoverLetterGenerator } from '../services/cover-letter-generator';
 import { ApplicationFiller } from '../services/application-filler';
 import { StagehandFiller } from '../services/stagehand-filler';
 import { FieldMapperService } from '../services/field-mapper.service';
-import {
-  insertApplication,
-  getResumeById,
-  getUserProfileFromResume,
-  getStructuredResumeById,
-  checkIfAlreadyApplied,
-} from '../services/db';
+import { supabase } from '../services/supabase';
+import { AuthRequest } from '../middleware/auth';
 import path from 'path';
+import fs from 'fs';
 
 const router = express.Router();
 const fieldMapper = new FieldMapperService();
@@ -23,7 +19,7 @@ function createFiller(): FillerInstance {
 }
 
 // Process multiple job applications
-router.post('/jobs', async (req, res) => {
+router.post('/jobs', async (req: AuthRequest, res) => {
   try {
     const { jobUrls, resumeId } = req.body;
 
@@ -35,21 +31,29 @@ router.post('/jobs', async (req, res) => {
       return res.status(400).json({ error: 'resumeId is required' });
     }
 
-    // Get user profile from stored resume
-    const rawProfile = getUserProfileFromResume(resumeId);
-    if (!rawProfile || !rawProfile.name || !rawProfile.email) {
+    const resumeRecord = await getResumeRecord(resumeId);
+    if (!resumeRecord) return res.status(404).json({ error: 'Resume not found' });
+
+    const rawProfile = await getUserProfile(resumeRecord.user_id);
+    if (!rawProfile?.full_name || !rawProfile?.email) {
       return res.status(400).json({
-        error:
-          'Resume not found or missing user profile. Please upload resume with profile information first.',
+        error: 'Resume not found or missing user profile. Please upload resume with profile information first.',
       });
     }
     const userProfile = {
-      ...rawProfile,
-      name: rawProfile.name!,
-      email: rawProfile.email!,
-      experience: rawProfile.experience || '',
-      skills: rawProfile.skills || [],
-      achievements: rawProfile.achievements || [],
+      name: rawProfile.full_name,
+      email: rawProfile.email,
+      phone: rawProfile.phone || '',
+      location: rawProfile.location || '',
+      linkedin: rawProfile.linkedin || '',
+      github: rawProfile.github || '',
+      experience: '',
+      skills: Array.isArray(rawProfile.skills) ? rawProfile.skills : [],
+      achievements: [],
+      expectedCTC: rawProfile.expected_ctc || '',
+      currentCTC: rawProfile.current_ctc || '',
+      noticePeriod: rawProfile.notice_period || '',
+      workAuthorization: rawProfile.work_authorization || '',
     };
 
     // Initialize services
@@ -92,8 +96,7 @@ router.post('/jobs', async (req, res) => {
         return res.status(400).json({ error: 'Resume not found' });
       }
 
-      // Get structured resume for better AI context
-      const structuredResume = getStructuredResumeById(resumeId);
+      const structuredResume = null;
 
       // Step 3: Generate cover letters for each job
       console.log('Generating cover letters...');
@@ -109,8 +112,8 @@ router.post('/jobs', async (req, res) => {
       // Step 4: Fill applications
       console.log('Filling applications...');
       await applicationFiller.init();
-      const resumeRecord = getResumeById(resumeId) as any;
-      const resumeFilePath = path.join(__dirname, '..', 'data', 'resumes', resumeRecord.filename);
+      const resumeDir = path.join(__dirname, '..', 'data', 'resumes');
+      const resumeFilePath = path.join(resumeDir, resumeRecord.filename);
       const applications = jobDescriptions.map((job, index) => ({
         jobUrl: job.url,
         coverLetter: coverLetters[index],
@@ -131,7 +134,8 @@ router.post('/jobs', async (req, res) => {
         const result = results[i];
         const jobDesc = jobDescriptions[i];
 
-        const applicationId = insertApplication(
+        const applicationId = await insertApplication(
+          req.userId!,
           jobDesc.url,
           result.success ? 'submitted' : 'failed',
           JSON.stringify({
@@ -168,99 +172,61 @@ router.post('/jobs', async (req, res) => {
 });
 
 // Process single job application
-router.post('/job', async (req, res) => {
+router.post('/job', async (req: AuthRequest, res) => {
   try {
     const { jobUrl, resumeId } = req.body;
 
-    if (!jobUrl) {
-      return res.status(400).json({ error: 'jobUrl is required' });
-    }
+    if (!jobUrl) return res.status(400).json({ error: 'jobUrl is required' });
+    if (!resumeId) return res.status(400).json({ error: 'resumeId is required' });
 
-    if (!resumeId) {
-      return res.status(400).json({ error: 'resumeId is required' });
-    }
+    const resumeRecord = await getResumeRecord(resumeId);
+    if (!resumeRecord) return res.status(404).json({ error: 'Resume not found' });
 
-    const rawProfile = getUserProfileFromResume(resumeId);
-    if (!rawProfile || !rawProfile.name || !rawProfile.email) {
-      return res.status(400).json({
-        error:
-          'Resume not found or missing user profile. Please upload resume with profile information first.',
-      });
+    const rawProfile = await getUserProfile(resumeRecord.user_id);
+    if (!rawProfile?.full_name || !rawProfile?.email) {
+      return res.status(400).json({ error: 'User profile incomplete. Please update your profile.' });
     }
     const userProfile = {
-      ...rawProfile,
-      name: rawProfile.name!,
-      email: rawProfile.email!,
-      experience: rawProfile.experience || '',
-      skills: rawProfile.skills || [],
-      achievements: rawProfile.achievements || [],
+      name: rawProfile.full_name,
+      email: rawProfile.email,
+      phone: rawProfile.phone || '',
+      location: rawProfile.location || '',
+      linkedin: rawProfile.linkedin || '',
+      github: rawProfile.github || '',
+      experience: '',
+      skills: Array.isArray(rawProfile.skills) ? rawProfile.skills : [],
+      achievements: [],
+      expectedCTC: rawProfile.expected_ctc || '',
+      currentCTC: rawProfile.current_ctc || '',
+      noticePeriod: rawProfile.notice_period || '',
+      workAuthorization: rawProfile.work_authorization || '',
     };
-
-    // Dedup check for single job
-    if (checkIfAlreadyApplied(jobUrl)) {
-      return res.status(409).json({ error: `Already applied to ${jobUrl}` });
-    }
 
     const jobCrawler = new JobCrawler();
     const coverLetterGenerator = new CoverLetterGenerator();
     const applicationFiller = createFiller();
 
     try {
-      console.log('Crawling job description...');
       const jobDescription = await jobCrawler.crawlJobDescription(jobUrl);
+      const resumeText = resumeRecord.parsed_text || '';
+      const coverLetter = await coverLetterGenerator.generateCoverLetter(jobDescription, userProfile, resumeText);
 
-      const resumeText = await getResumeText(resumeId);
-      if (!resumeText) {
-        return res.status(400).json({ error: 'Resume not found' });
-      }
-
-      const structuredResume = getStructuredResumeById(resumeId);
-
-      console.log('Generating cover letter...');
-      const coverLetter = await coverLetterGenerator.generateCoverLetter(
-        jobDescription,
-        userProfile,
-        resumeText
-      );
-
-      console.log('Filling application...');
       await applicationFiller.init();
-      const resumeRecord = getResumeById(resumeId) as any;
       const resumeFilePath = path.join(__dirname, '..', 'data', 'resumes', resumeRecord.filename);
       const results = await applicationFiller.processMultipleApplications(
-        [
-          {
-            jobUrl,
-            coverLetter,
-            resumePath: resumeFilePath,
-            applyLink: jobDescription.applyLink,
-            resumeText,
-            structuredResume,
-          },
-        ],
+        [{ jobUrl, coverLetter, resumePath: resumeFilePath, applyLink: jobDescription.applyLink, resumeText, structuredResume: null }],
         userProfile
       );
 
       const result = results[0];
-
-      const applicationId = insertApplication(
+      const applicationId = await insertApplication(
+        req.userId!,
         jobUrl,
         result.success ? 'submitted' : 'failed',
-        JSON.stringify({
-          coverLetter,
-          error: result.error,
-          submittedAt: result.submittedAt,
-        })
+        JSON.stringify({ coverLetter, error: result.error, submittedAt: result.submittedAt })
       );
 
-      res.json({
-        jobTitle: jobDescription.title,
-        company: jobDescription.company,
-        applicationId,
-        success: result.success,
-        error: result.error,
-        coverLetter,
-      });
+      res.json({ jobTitle: jobDescription.title, company: jobDescription.company, applicationId, success: result.success, error: result.error, coverLetter });
     } finally {
       await jobCrawler.close();
       await applicationFiller.close();
@@ -322,15 +288,32 @@ router.post('/cover-letter-pdf', (req, res) => {
   }
 });
 
-// Helper function to get resume text by ID
-async function getResumeText(resumeId: number): Promise<string | null> {
-  try {
-    const resume = getResumeById(resumeId) as any;
-    return resume ? resume.text : null;
-  } catch (error) {
-    console.error('Error getting resume text:', error);
-    return null;
-  }
+async function getResumeText(resumeId: string): Promise<string | null> {
+  const { data } = await supabase.from('resumes').select('parsed_text').eq('id', resumeId).single();
+  return data?.parsed_text ?? null;
+}
+
+async function getResumeRecord(resumeId: string) {
+  const { data } = await supabase.from('resumes').select('id, user_id, filename, parsed_text').eq('id', resumeId).single();
+  return data;
+}
+
+async function getUserProfile(userId: string) {
+  const { data } = await supabase
+    .from('profiles')
+    .select('full_name, email, phone, location, linkedin, github, skills, experience, education, expected_ctc, current_ctc, notice_period, work_authorization')
+    .eq('id', userId)
+    .single();
+  return data;
+}
+
+async function insertApplication(userId: string, jobUrl: string, status: string, response: string) {
+  const { data } = await supabase
+    .from('applications')
+    .insert({ user_id: userId, job_url: jobUrl, status, response })
+    .select('id')
+    .single();
+  return data?.id;
 }
 
 export default router;

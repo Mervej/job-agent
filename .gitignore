@@ -13,3 +13,8 @@ src/data/
 
 # Extension release zip (build artifact — attached to GitHub Releases)
 job-agent-extension-*.zip
+
+# Frontend build output and local env
+web/dist/
+web/.env.local
+web/node_modules/

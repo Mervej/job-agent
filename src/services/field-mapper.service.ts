@@ -1,7 +1,7 @@
 import { generateText } from './ai.service';
 import { JobCrawler } from './job-crawler';
 import { CoverLetterGenerator, UserProfile } from './cover-letter-generator';
-import { getResumeById, getUserProfileFromResume, getStructuredResumeById } from './db';
+import { supabase } from './supabase';
 import { StructuredResume } from './resume';
 
 // ─── Public types ─────────────────────────────────────────────────────────────
@@ -307,14 +307,15 @@ Write a concise, 2–4 sentence answer in first person, specific and grounded in
           mappedData = userProfile.currentCompany || (structuredResume as any)?.experience?.[0]?.company || '';
         } else if (info.includes('current title') || info.includes('role') || info.includes('position')) {
           mappedData = userProfile.currentRole || (structuredResume as any)?.experience?.[0]?.role || '';
-        } else if ((field.questionText || '').includes('?')) {
+        } else if (field.questionText || field.label) {
+          const question = field.questionText || field.label;
           needsAI = true;
           aiPrompt = `You are the candidate filling out a job application.
 
 Question:
-${field.questionText}
+${question}
 
-Write a concise answer in first person, grounded ONLY in the resume below.
+Write a concise answer in first person, grounded ONLY in the resume below. If it is a yes/no question answer only "Yes" or "No". If it asks for a number answer only the number. Keep answers brief (1-3 sentences max).
 
 Resume:
 ${resumeContext}`;
@@ -425,30 +426,47 @@ ${resumeContext}`;
 
   async mapFields(
     fields: ExtensionField[],
-    resumeId: number,
+    resumeId: string,
     jobUrl: string
   ): Promise<MapFieldsResult> {
-    const resume = getResumeById(resumeId) as any;
-    if (!resume) throw new Error('Resume not found');
+    const { data: resume, error: resumeErr } = await supabase
+      .from('resumes')
+      .select('id, user_id, parsed_text')
+      .eq('id', resumeId)
+      .single();
 
-    const rawProfile = getUserProfileFromResume(resumeId) as any;
+    if (resumeErr || !resume) throw new Error('Resume not found');
+
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('full_name, email, phone, location, linkedin, github, skills, experience, education, expected_ctc, current_ctc, notice_period, work_authorization')
+      .eq('id', resume.user_id)
+      .single();
+
+    const resumeText = resume.parsed_text || '';
+
     const userProfile: UserProfile = {
-      name: rawProfile?.name || '',
-      email: rawProfile?.email || '',
-      phone: rawProfile?.phone || '',
-      location: rawProfile?.location || '',
-      linkedin: rawProfile?.linkedin || '',
-      github: rawProfile?.github || '',
-      experience: rawProfile?.experience || '',
-      skills: rawProfile?.skills || [],
-      achievements: rawProfile?.achievements || [],
-      expectedCTC: rawProfile?.expectedCTC || '',
-      currentCTC: rawProfile?.currentCTC || '',
-      noticePeriod: rawProfile?.noticePeriod || '',
-      workAuthorization: rawProfile?.workAuthorization || '',
+      name: profile?.full_name || '',
+      email: profile?.email || '',
+      phone: profile?.phone || '',
+      location: profile?.location || '',
+      linkedin: profile?.linkedin || '',
+      github: profile?.github || '',
+      experience: '',
+      skills: Array.isArray(profile?.skills) ? profile.skills : [],
+      achievements: [],
+      expectedCTC: profile?.expected_ctc || '',
+      currentCTC: profile?.current_ctc || '',
+      noticePeriod: profile?.notice_period || '',
+      workAuthorization: profile?.work_authorization || '',
     };
 
-    const structuredResume = getStructuredResumeById(resumeId);
+    const structuredResume: any = {
+      profileDetails: {},
+      experience: Array.isArray(profile?.experience) ? profile.experience : [],
+      education: Array.isArray(profile?.education) ? profile.education : [],
+      skills: Array.isArray(profile?.skills) ? profile.skills : [],
+    };
 
     const jobCrawler = new JobCrawler();
     const coverLetterGenerator = new CoverLetterGenerator();
@@ -456,13 +474,13 @@ ${resumeContext}`;
 
     try {
       const jobDescription = await jobCrawler.crawlJobDescription(jobUrl);
-      coverLetter = await coverLetterGenerator.generateCoverLetter(jobDescription, userProfile, resume.text);
+      coverLetter = await coverLetterGenerator.generateCoverLetter(jobDescription, userProfile, resumeText);
     } finally {
       await jobCrawler.close();
     }
 
-    const mappings = this.mapFieldsToData(fields, userProfile, coverLetter, resume.text, structuredResume);
-    const resolved = await this.generateAnswersForAIFields(mappings, resume.text);
+    const mappings = this.mapFieldsToData(fields, userProfile, coverLetter, resumeText, structuredResume);
+    const resolved = await this.generateAnswersForAIFields(mappings, resumeText);
 
     const result: MappedField[] = resolved.map((m) => ({
       selector: m.field.selector,
@@ -475,7 +493,7 @@ ${resumeContext}`;
       coverLetter,
       resumeDownloadUrl: `/resumes/${resumeId}/file`,
       structuredResume,
-      resumeText: resume.text,
+      resumeText,
     };
   }
 
