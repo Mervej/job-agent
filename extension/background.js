@@ -14,6 +14,19 @@ const backendReady = (async () => {
   return PROD_URL;
 })();
 
+// ─── Toolbar click: force-open panel on any page ─────────────────────────────
+
+chrome.action.onClicked.addListener(async (tab) => {
+  if (!tab.id || !tab.url || tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://')) return;
+  await chrome.tabs.sendMessage(tab.id, { type: 'FORCE_OPEN' }).catch(() => {
+    // Content script not ready (e.g. page still loading) — inject and retry
+    chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: () => window.postMessage({ type: 'FORCE_OPEN' }, '*'),
+    });
+  });
+});
+
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 
 async function authHeaders(extra = {}) {
@@ -91,13 +104,13 @@ async function handleFetchResumeFile(resumeId, sendResponse) {
   }
 }
 
-async function handleMapEntryFields({ fields, entryType, entryData, resumeText }, sendResponse) {
+async function handleMapEntryFields({ fields, entryType, entryData, resumeText, isCurrentJob }, sendResponse) {
   try {
     const url = await backendReady;
     const res = await fetch(`${url}/apply/map-entry-fields`, {
       method: 'POST',
       headers: await authHeaders(),
-      body: JSON.stringify({ fields, entryType, entryData, resumeText }),
+      body: JSON.stringify({ fields, entryType, entryData, resumeText, isCurrentJob }),
     });
     if (!res.ok) throw new Error(`Backend returned ${res.status}`);
     const data = await res.json();

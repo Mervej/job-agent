@@ -3,7 +3,21 @@
  * Dispatches synthetic input/change events so React/Vue state updates.
  */
 async function fillField(selector, value, elementType, inputType, isCombobox) {
-  const el = document.querySelector(selector);
+  let el = document.querySelector(selector);
+
+  // Fallback: CSS parsers fail on compound selectors when name contains brackets
+  // (e.g. input[type="text"][name="foo[bar][][baz]"] returns null).
+  // Extract the name and search directly.
+  if (!el) {
+    const nameMatch = selector.match(/\[name="([^"]+)"\]/);
+    if (nameMatch) {
+      const name = nameMatch[1];
+      el = document.querySelector(`[name="${name}"]`)
+        || [...document.querySelectorAll('input,textarea,select')].find(e => e.name === name)
+        || null;
+    }
+  }
+
   if (!el) return false;
 
   try {

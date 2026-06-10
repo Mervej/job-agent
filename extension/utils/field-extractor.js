@@ -100,7 +100,9 @@ function makeSelector(el, index) {
   if (id) return `${tag}[id="${id}"]`;
   // Only use [type] for <input> — textarea/select have a .type JS property but no type HTML attribute,
   // so textarea[type="textarea"] would match nothing in the DOM.
-  if (name && tag === 'input' && type) return `${tag}[type="${type}"][name="${name}"]`;
+  // Also skip [type] when name contains brackets — CSS parsers miscount brackets in compound
+  // attribute selectors, causing querySelector to return null.
+  if (name && tag === 'input' && type && !name.includes('[') && !name.includes(']')) return `${tag}[type="${type}"][name="${name}"]`;
   if (name) return `${tag}[name="${name}"]`;
   if (aria) return `${tag}[aria-label="${aria}"]`;
   if (placeholder) return `${tag}[placeholder="${placeholder}"]`;
@@ -127,7 +129,22 @@ function getLabel(el) {
   const parentLabel = el.closest('label');
   if (parentLabel) return parentLabel.textContent?.trim() || '';
 
-  const group = el.closest('.form-group, .field, .form-row, .row, div');
+  // Previous sibling label — checked before the broad .closest('div') to avoid picking up
+  // labels from other sections. Covers Lever's <div class="application-label">, Ashby,
+  // and any ATS that places a label-like element before the field or its wrapper.
+  for (const node of [el, el.parentElement]) {
+    if (!node) continue;
+    const prev = node.previousElementSibling;
+    if (!prev) continue;
+    const tag = prev.tagName?.toLowerCase();
+    // Skip if prev IS an interactive element, or CONTAINS interactive elements (it's a question block)
+    if (['input', 'select', 'textarea', 'button'].includes(tag)) continue;
+    if (prev.querySelector('input, textarea, select')) continue;
+    const t = (prev.textContent || '').trim();
+    if (t && t.length <= 200) return t;
+  }
+
+  const group = el.closest('.form-group, .field, .form-row, .row');
   if (group) {
     const maybeLabel = group.querySelector('label');
     if (maybeLabel) return maybeLabel.textContent?.trim() || '';
@@ -137,9 +154,15 @@ function getLabel(el) {
 }
 
 function getQuestionText(el) {
-  const isQuestionLike = (text) => text && text.length > 3 && text.length < 300 && !/^[\d\s\-+*.]+$/.test(text);
+  // Only treat text as a "question" if it's genuinely question-like (not a field label).
+  // A short noun phrase like "First Name" or "Start Date" is a label, not a question.
+  const isQuestionLike = (text) => {
+    if (!text || text.length < 15 || text.length > 300) return false;
+    if (/^[\d\s\-+*.]+$/.test(text)) return false;
+    // Must contain a question word or be a multi-word sentence (i.e. not just a field label)
+    return text.includes('?') || /\b(what|why|how|when|where|who|describe|explain|tell us|list|provide|do you|have you|are you|will you|would you|please)\b/i.test(text);
+  };
 
-  // Check previous siblings up to 3 levels
   let ancestor = el.parentElement;
   let depth = 0;
   while (ancestor && depth < 4) {
@@ -148,8 +171,13 @@ function getQuestionText(el) {
     while (prev && hops < 5) {
       const tag = prev.tagName?.toLowerCase();
       if (!['input', 'select', 'textarea', 'button', 'form'].includes(tag)) {
-        const text = (prev.textContent || '').trim();
-        if (isQuestionLike(text)) return text;
+        // Skip container elements that enclose interactive children — they're
+        // question blocks or sections, not labels. Their textContent would bleed
+        // the sibling question's text into unrelated fields.
+        if (!prev.querySelector('input, textarea, select, button')) {
+          const text = (prev.textContent || '').trim();
+          if (isQuestionLike(text)) return text;
+        }
       }
       prev = prev.previousElementSibling;
       hops++;

@@ -263,7 +263,9 @@ router.post('/map-entry-fields', (req, res) => {
     return res.status(400).json({ error: 'fields, entryType and entryData are required' });
   }
   try {
+    console.log('[map-entry-fields]', entryType, 'entryData keys:', Object.keys(entryData), 'values:', JSON.stringify(entryData));
     const mappings = fieldMapper.mapEntryFields(fields, entryType, entryData, resumeText || '', !!isCurrentJob);
+    console.log('[map-entry-fields] mappings:', mappings.map(m => `${m.selector.slice(-30)} → "${m.value}"`).join(' | '));
     res.json({ mappings });
   } catch (error: any) {
     res.status(500).json({ error: error.message });

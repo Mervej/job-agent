@@ -38,6 +38,10 @@ const ATS_PATTERNS = [
   // BambooHR
   /.*\.bamboohr\.com\/careers\/.+\/apply/,
 
+  // Freshteam (Freshworks)
+  /.*\.freshteam\.com\/jobs\/.+\/apply/,
+  /.*\.freshteam\.com\/jobs\//,
+
   // Generic apply page detection (fallback — checked last)
   /[?&/]apply($|[/?&#])/,
   /[?&/]application($|[/?&#])/,

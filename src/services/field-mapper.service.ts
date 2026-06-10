@@ -78,14 +78,78 @@ Candidate resume:
 ${resumeContext}`;
 }
 
+// ─── AI prompt builder ────────────────────────────────────────────────────────
+
+function buildAiFieldPrompt(question: string): string {
+  const q = question.toLowerCase().replace(/[✱*]+$/, '').trim();
+
+  let hint: string;
+
+  // Explicit yes/no question (has ? and a question verb)
+  if (question.includes('?') && /\b(do you|have you|are you|will you|can you|is your|did you|would you|are there)\b/i.test(question)) {
+    hint = 'Respond with ONLY "Yes" or "No".';
+
+  // Numeric score / grade / percentage
+  } else if (/\b(cgpa|gpa|percentage|score|grade)\b/.test(q) || (/\b%\b/.test(q) && !question.includes('?'))) {
+    hint = 'Respond with ONLY the value (e.g. "8.5 CGPA" or "76%"). No labels or extra text.';
+
+  // Years of experience
+  } else if (/\btotal.*year|\byears? of experience|\bexperience.*year/.test(q)) {
+    hint = 'Respond with ONLY the number (e.g. "6" or "8.5+"). No labels or extra text.';
+
+  // Date / year
+  } else if (/\b(year|date|month|when)\b/.test(q) && !question.includes('?')) {
+    hint = 'Respond with ONLY the date in MM/YYYY or YYYY format (e.g. "06/2019" or "2019").';
+
+  // List request
+  } else if (/\b(list|all|mention|companies|achievements|provide all)\b/i.test(question)) {
+    hint = 'Format as a clean list, one item per line (e.g. "Company Name (MM/YYYY – MM/YYYY)").';
+
+  // Short label with no question mark — single-value field (branch, degree, city, etc.)
+  } else if (question.length < 50 && !question.includes('?')) {
+    hint = 'Respond with ONLY the value, no labels or extra text.';
+
+  // Narrative / descriptive
+  } else {
+    hint = 'Respond in first person, 1–3 sentences. Do not repeat the question or add a label.';
+  }
+
+  return `Fill in this job application field: "${question}"\n\n${hint}`;
+}
+
 // ─── Service ──────────────────────────────────────────────────────────────────
 
 export class FieldMapperService {
   getFieldSemanticType(field: ExtensionField): string {
-    const info = `${field.label || ''} ${field.placeholder || ''} ${field.fieldName} ${field.autocomplete || ''} ${field.questionText || ''}`.toLowerCase();
+    // Deliberately excludes questionText — on many ATSes questionText is the previous field's
+    // label (picked up by DOM walking), which causes cascading wrong type matches.
+    const info = `${field.label || ''} ${field.placeholder || ''} ${field.fieldName} ${field.autocomplete || ''}`.toLowerCase();
+
+    // Long narrative/question labels should never be reduced to a simple field type —
+    // they need AI to generate a proper answer (e.g. "List all companies with tenure").
+    const labelText = (field.label || '').trim();
+    const isNarrativeQuestion = labelText.length > 50 ||
+      /\b(mention|list|describe|pls|please|explain|provide|along with|tell us|worked with)\b/i.test(labelText);
 
     if (field.inputType === 'email' || info.includes('email')) return 'email';
     if (field.inputType === 'tel' || info.includes('phone') || info.includes('mobile')) return 'phone';
+
+    // URL inputs and personal-link labels → portfolio/github
+    if (field.inputType === 'url' || info.includes('hyperlink') || info.includes('personal url') || info.includes('personal website')) return 'portfolio';
+
+    // Education-specific fields (must come before generic 'experience' check below)
+    if (info.match(/\b(institution|university|college|school)\b.*name|name.*\b(institution|university|college|school)\b|\binstitution\b|\buniversity\b|\bcollege\b|\bschool_name\b/)) return 'eduInstitution';
+    if (info.match(/\bdegree\b/) && !info.match(/required|minimum|preferred|looking for|at least/)) return 'eduDegree';
+    if (info.match(/field[\s_]of[\s_]study|area[\s_]of[\s_]study|\bmajor\b/)) return 'eduField';
+    if (info.match(/\bgpa\b|\bgrade\b/) && !info.match(/salary|pay|compensat|experience/)) return 'eduGrade';
+
+    // Experience/employer fields — guard against narrative question labels that happen to
+    // contain the word "company" or "employer" (e.g. "List all companies with tenure")
+    if (!isNarrativeQuestion && info.match(/\bemployer\b(?! id| number| identification)|employer name|\bcompany\b(?! website| profile| url)/)) return 'expCompany';
+    if (!isNarrativeQuestion && info.match(/\bjob title\b|work title|\btitle\b/) && !info.match(/required|preferred|looking for/)) return 'expTitle';
+
+    // "Currently working here" / "Currently pursuing" checkboxes
+    if (info.match(/\bis_current\b|\bcurrently_working\b|\bcurrently_employed\b|\bcurrently_pursuing\b/)) return 'currentlyActive';
 
     // Use autocomplete attribute as the most reliable signal
     if (field.autocomplete === 'given-name' || field.autocomplete === 'first-name') return 'firstName';
@@ -119,6 +183,7 @@ export class FieldMapperService {
     ) return 'fullName';
     if (info.includes('linkedin')) return 'linkedin';
     if (info.includes('github')) return 'github';
+    if (info.includes('twitter') || info.includes('x.com')) return 'twitter';
     if (info.includes('portfolio') || info.includes('website')) return 'portfolio';
     if (info.includes('location') || info.includes('city') || info.includes('country')) return 'location';
     if (info.includes('resume') || info.includes('cv')) return 'resume';
@@ -218,6 +283,18 @@ export class FieldMapperService {
     resumeText: string,
     structuredResume?: StructuredResume | null
   ): FieldMapping[] {
+    // Semantic types that map directly to a profile field or a fixed default answer.
+    // Everything NOT in this set goes to AI.
+    const DIRECT_TYPES = new Set([
+      'email', 'phone', 'firstName', 'lastName', 'fullName',
+      'linkedin', 'github', 'twitter', 'portfolio',
+      'location', 'skills',
+      'currentCTC', 'expectedCTC', 'noticePeriod', 'workAuthorization',
+      'needsSponsorship', 'relocation', 'previouslyEmployed', 'conflictOfInterest',
+      'ifYesFollowUp', 'diversity',
+      'resume', 'coverLetter',
+    ]);
+
     const mappings: FieldMapping[] = [];
 
     for (const field of fields) {
@@ -225,103 +302,46 @@ export class FieldMapperService {
       let needsAI = false;
       let aiPrompt: string | undefined;
 
-      const info = `${field.label || ''} ${field.placeholder || ''} ${field.fieldName} ${field.autocomplete || ''} ${field.questionText || ''}`.toLowerCase();
       const resumeContext = resumeText || '';
       const semanticType = this.getFieldSemanticType(field);
 
+      console.log(`[FieldMapper] field: "${field.label || field.fieldName}" | selector: ${field.selector} | semanticType: ${semanticType} | questionText: "${field.questionText || ''}"`);
+
+      // ── Tier 1: direct profile lookups ────────────────────────────────────────
       switch (semanticType) {
-        case 'email': mappedData = userProfile.email; break;
-        case 'phone': mappedData = userProfile.phone || ''; break;
-        case 'firstName': mappedData = userProfile.name.split(' ')[0]; break;
-        case 'lastName': mappedData = userProfile.name.split(' ').slice(1).join(' '); break;
-        case 'fullName': mappedData = userProfile.name; break;
-        case 'linkedin': mappedData = userProfile.linkedin || ''; break;
-        case 'github': mappedData = userProfile.github || ''; break;
-        case 'portfolio': mappedData = userProfile.github || userProfile.linkedin || ''; break;
-        case 'location': mappedData = userProfile.location || ''; break;
-        case 'coverLetter': mappedData = coverLetter; break;
-        case 'currentCTC': mappedData = userProfile.currentCTC || ''; break;
-        case 'expectedCTC': mappedData = userProfile.expectedCTC || ''; break;
-        case 'noticePeriod': mappedData = userProfile.noticePeriod || ''; break;
+        case 'email':             mappedData = userProfile.email; break;
+        case 'phone':             mappedData = userProfile.phone || ''; break;
+        case 'firstName':         mappedData = userProfile.name.split(' ')[0]; break;
+        case 'lastName':          mappedData = userProfile.name.split(' ').slice(1).join(' '); break;
+        case 'fullName':          mappedData = userProfile.name; break;
+        case 'linkedin':          mappedData = userProfile.linkedin || ''; break;
+        case 'github':            mappedData = userProfile.github || ''; break;
+        case 'twitter':           mappedData = (userProfile as any).twitter || ''; break;
+        case 'portfolio':         mappedData = userProfile.github || userProfile.linkedin || ''; break;
+        case 'location':          mappedData = userProfile.location || ''; break;
+        case 'skills':            mappedData = userProfile.skills?.join(', ') || ''; break;
+        case 'currentCTC':        mappedData = userProfile.currentCTC || ''; break;
+        case 'expectedCTC':       mappedData = userProfile.expectedCTC || ''; break;
+        case 'noticePeriod':      mappedData = userProfile.noticePeriod || ''; break;
         case 'workAuthorization': mappedData = userProfile.workAuthorization || 'Yes'; break;
-        case 'relocation': mappedData = userProfile.willingToRelocate || 'Yes'; break;
-        case 'needsSponsorship': mappedData = 'No'; break;
+        case 'needsSponsorship':  mappedData = 'No'; break;
+        case 'relocation':        mappedData = (userProfile as any).willingToRelocate || 'Yes'; break;
         case 'previouslyEmployed': mappedData = 'No'; break;
         case 'conflictOfInterest': mappedData = 'No'; break;
-        case 'ifYesFollowUp': mappedData = ''; break;
-        case 'diversity': mappedData = ''; break;
-        case 'resume': mappedData = undefined; needsAI = false; break;
-        case 'summary': {
-          let technicalContext = '';
-          if (structuredResume) {
-            if (structuredResume.experience?.length) {
-              technicalContext += 'Experience:\n' + structuredResume.experience.map((e: any) =>
-                `${e.role} at ${e.company} (${e.startDate} – ${e.endDate || 'Present'})${e.description ? ': ' + e.description : ''}${e.achievements?.length ? '\n- ' + e.achievements.join('\n- ') : ''}`
-              ).join('\n\n') + '\n\n';
-            }
-            if (structuredResume.skills?.length) {
-              technicalContext += 'Skills: ' + structuredResume.skills.join(', ') + '\n\n';
-            }
-          }
-          const summaryContext = technicalContext.trim() || resumeContext;
-          needsAI = true;
-          aiPrompt = `Write a concise 2–3 sentence professional summary in first person, focused entirely on technical expertise, years of experience, and key skills. Do NOT include contact details, location, phone, or links. Base it only on the technical information below.\n\n${summaryContext}`;
-          break;
-        }
+        case 'ifYesFollowUp':     mappedData = ''; break;
+        case 'diversity':         mappedData = ''; break;
+        case 'resume':            mappedData = undefined; needsAI = false; break;
+        case 'coverLetter':       mappedData = coverLetter; break;
       }
 
-      if (!mappedData && semanticType === 'other') {
-        if (info.includes('why this role') || info.includes('why do you want')) {
-          needsAI = true;
-          aiPrompt = `You are helping a candidate answer an application question based on their resume.
-
-Question:
-${field.questionText || field.label || 'Explain why you are a good fit for this role.'}
-
-Candidate resume:
-${resumeContext}
-
-Write a concise, 2–4 sentence answer in first person, specific and grounded in the resume.`;
-        } else if (info.includes('years of experience') || info.includes('experience (years)')) {
-          if (structuredResume?.experience?.length) {
-            const earliest = structuredResume.experience[structuredResume.experience.length - 1];
-            const match = (earliest.startDate || '').match(/\b(19|20)\d{2}\b/);
-            if (match) {
-              mappedData = String(new Date().getFullYear() - parseInt(match[0], 10));
-            }
-          }
-          if (!mappedData) {
-            needsAI = true;
-            aiPrompt = `Estimate total years of professional experience from this resume. Return only a number:\n\n${resumeContext}`;
-          }
-        } else if (info.includes('skills')) {
-          if (structuredResume?.skills?.length) {
-            mappedData = structuredResume.skills.join(', ');
-          } else if (userProfile.skills?.length) {
-            mappedData = userProfile.skills.join(', ');
-          } else {
-            needsAI = true;
-            aiPrompt = `Extract the candidate's key technical and professional skills as a comma-separated list:\n\n${resumeContext}`;
-          }
-        } else if (info.includes('current company') || info.includes('employer')) {
-          mappedData = userProfile.currentCompany || (structuredResume as any)?.experience?.[0]?.company || '';
-        } else if (info.includes('current title') || info.includes('role') || info.includes('position')) {
-          mappedData = userProfile.currentRole || (structuredResume as any)?.experience?.[0]?.role || '';
-        } else if (field.questionText || field.label) {
-          const question = field.questionText || field.label;
-          needsAI = true;
-          aiPrompt = `You are the candidate filling out a job application.
-
-Question:
-${question}
-
-Write a concise answer in first person, grounded ONLY in the resume below. If it is a yes/no question answer only "Yes" or "No". If it asks for a number answer only the number. Keep answers brief (1-3 sentences max).
-
-Resume:
-${resumeContext}`;
-        }
+      // ── Tier 2: AI for everything else ────────────────────────────────────────
+      if (!DIRECT_TYPES.has(semanticType)) {
+        const question = field.questionText || field.label || field.fieldName;
+        needsAI = true;
+        aiPrompt = buildAiFieldPrompt(question);
       }
 
+      // ── Options handling: try to match mapped value; fall back to AI pick ─────
       const validOptions = (field.options || []).filter(
         (o) => o.text && o.text.trim() && !/^(-+|select\.?\.?\.?|choose\.?\.?\.?|please select)$/i.test(o.text.trim())
       );
@@ -376,7 +396,8 @@ ${resumeContext}`;
     const aiMappings = mappings.filter((m) => m.needsAI && m.aiPrompt);
     if (aiMappings.length === 0) return mappings;
 
-    const resumeSystemPrompt = `Candidate resume:\n${resumeText}`;
+    // Resume in system prompt; each aiPrompt contains only the question + format hint.
+    const resumeSystemPrompt = `You are filling out a job application on behalf of a candidate. Answer using ONLY information from their resume below. Do not invent details.\n\nResume:\n${resumeText}`;
 
     for (const mapping of aiMappings) {
       const label = mapping.field.label || mapping.field.fieldName;
@@ -391,32 +412,32 @@ ${resumeContext}`;
 
         let answer: string;
         if (hasOptions) {
-          // Pass the full aiPrompt (which already contains options + resume) as the user message.
-          // Use a lightweight system prompt to avoid duplicating the resume.
+          console.log(`[FieldMapper] AI (options) | selector: ${mapping.field.selector} | label: ${label} | prompt:\n${mapping.aiPrompt}`);
           answer = await generateText('You are filling a job application form.', mapping.aiPrompt!, maxTokens);
+        } else if (mapping.aiPrompt) {
+          // Use the context-rich prompt crafted in mapFieldsToData — it already contains the
+          // right question text, resume context, and field-specific instructions.
+          console.log(`[FieldMapper] AI | selector: ${mapping.field.selector} | label: "${label}" | using aiPrompt`);
+          answer = await generateText(resumeSystemPrompt, mapping.aiPrompt, maxTokens);
+          console.log(`[FieldMapper] AI response for "${label}": "${answer?.trim()}"`);
         } else {
-          const prompt = mapping.aiPrompt!;
-          const questionMatch = prompt.match(/Question:\s*([\s\S]+?)(?:\nResume:|\nCandidate resume:|$)/);
-          const question =
-            questionMatch?.[1].trim() ||
-            mapping.field.questionText ||
-            mapping.field.label ||
-            mapping.field.placeholder ||
-            mapping.field.fieldName;
-          answer = await generateText(resumeSystemPrompt, question, maxTokens);
+          // Fallback for fields that reached needsAI=true without an aiPrompt
+          const fieldLabel = mapping.field.label || mapping.field.placeholder || mapping.field.fieldName;
+          const finalPrompt = `Fill in this job application field: "${fieldLabel}". Respond with ONLY the value, nothing else.`;
+          console.log(`[FieldMapper] AI (fallback) | selector: ${mapping.field.selector} | label: "${fieldLabel}"`);
+          answer = await generateText(resumeSystemPrompt, finalPrompt, maxTokens);
+          console.log(`[FieldMapper] AI response for "${fieldLabel}": "${answer?.trim()}"`);
         }
 
         if (answer?.trim()) {
           if (hasOptions) {
             const matched = this.fuzzyMatchOption(answer.trim(), validOptions);
-            // If no option matches, leave mappedData undefined so the panel flags it for manual input.
             if (matched) mapping.mappedData = matched;
           } else {
             mapping.mappedData = answer.trim();
           }
         }
       } catch {
-        // leave mappedData undefined on AI failure — panel will flag for manual input
         void label;
       }
     }
@@ -529,22 +550,37 @@ ${resumeContext}`;
       let confidence = 0.5;
       let isCheckbox = false;
 
+      // Normalise field names — DB may use camelCase (startDate), snake_case (start_date),
+      // or short forms (start/end/title/school) depending on how the resume was parsed.
+      const expTitle   = entryData.role        || entryData.title       || entryData.designation  || entryData.jobTitle    || '';
+      const expStart   = entryData.startDate   || entryData.start       || entryData.start_date   || '';
+      const expEnd     = entryData.endDate     || entryData.end         || entryData.end_date     || '';
+      const expDesc    = entryData.description || entryData.summary     || entryData.achievements || '';
+      const eduSchool  = entryData.institution || entryData.school      || entryData.university   || entryData.college     || '';
+      const eduDegree  = entryData.degree      || entryData.qualification || '';
+      const eduField   = entryData.fieldOfStudy || entryData.field_of_study || entryData.major   || entryData.subject     || '';
+      const eduStart   = entryData.startDate   || entryData.start       || entryData.start_year  || '';
+      // "year" alone = graduation year → use for end date
+      const eduEnd     = entryData.endDate     || entryData.end         || entryData.year         || entryData.graduation_year || '';
+
       if (entryType === 'experience') {
-        if (info.match(/\btitle\b|position|job title/)) { value = entryData.role || ''; confidence = 1.0; }
+        if (info.match(/\btitle\b|\bposition\b|job title|designation/)) { value = expTitle; confidence = 1.0; }
         else if (info.match(/company|employer|organization|org\b/)) { value = entryData.company || ''; confidence = 1.0; }
-        else if (info.match(/industry|sector|field of work/)) { value = ''; confidence = 0.0; } // leave blank — too ambiguous to guess
-        else if (info.match(/current(ly)?.*work|still.*work|present.*position|ongoing|i currently/)) { isCheckbox = true; value = isCurrentJob ? 'true' : 'false'; confidence = 1.0; }
-        else if (info.match(/start.*date|from.*date|begin.*date|\bstart\b.*mm|date.*start/)) { value = this.formatDate(entryData.startDate || ''); confidence = 1.0; }
-        else if (info.match(/end.*date|to.*date|\bend\b.*mm|date.*end/)) { value = isCurrentJob ? '' : this.formatDate(entryData.endDate || ''); confidence = 1.0; }
-        else if (info.match(/description|responsibilities|duties|detail|summary|about|what did you do/)) { value = [entryData.description, entryData.achievements].filter(Boolean).join('\n').trim(); confidence = 0.9; }
+        else if (info.match(/industry|sector|field of work/)) { value = ''; confidence = 0.0; }
+        else if (info.match(/current(ly)?.*work|still.*work|present.*position|ongoing|i currently|\bis_current\b|\bcurrently_pursuing\b/)) { isCheckbox = true; value = isCurrentJob ? 'true' : 'false'; confidence = 1.0; }
+        else if (info.match(/start.*date|from.*date|begin.*date|\bstart\b.*mm|date.*start/)) { value = this.formatDate(expStart); confidence = 1.0; }
+        else if (info.match(/end.*date|to.*date|\bend\b.*mm|date.*end/)) { value = isCurrentJob ? '' : this.formatDate(expEnd); confidence = 1.0; }
+        else if (info.match(/description|responsibilities|duties|detail|summary|about|what did you do/)) { value = expDesc; confidence = 0.9; }
         else if (info.match(/location|city|country/)) { value = entryData.location || ''; confidence = 1.0; }
       } else if (entryType === 'education') {
-        if (info.match(/school|university|college|institution|organization/)) { value = entryData.institution || ''; confidence = 1.0; }
-        else if (info.match(/degree|qualification|level|award/)) { value = entryData.degree || ''; confidence = 1.0; }
-        else if (info.match(/field|major|subject|study|discipline/)) { value = entryData.fieldOfStudy || ''; confidence = 1.0; }
-        else if (info.match(/start.*date|\bstart\b.*mm/)) { value = this.formatDate(entryData.startDate || ''); confidence = 1.0; }
-        else if (info.match(/end.*date|graduation|\bend\b.*mm/)) { value = this.formatDate(entryData.endDate || ''); confidence = 1.0; }
-        else if (info.match(/grade|gpa|score|result/)) { value = entryData.grade || ''; confidence = 0.8; }
+        if (info.match(/\bis_current\b|\bcurrently_pursuing\b/)) { isCheckbox = true; value = isCurrentJob ? 'true' : 'false'; confidence = 1.0; }
+        else if (info.match(/school|university|college|institution|organization/)) { value = eduSchool; confidence = 1.0; }
+        // \bqualification\b so "qualifications_attributes" in the fieldName doesn't false-match every field
+        else if (info.match(/\bdegree\b|\bqualification\b|level|award/)) { value = eduDegree; confidence = 1.0; }
+        else if (info.match(/field[\s_]of[\s_]study|field_of_study|major|subject|\bstudy\b|discipline/)) { value = eduField; confidence = 1.0; }
+        else if (info.match(/start.*date|\bstart\b.*mm/)) { value = this.formatDate(eduStart); confidence = 1.0; }
+        else if (info.match(/end.*date|graduation|\bend\b.*mm/)) { value = isCurrentJob ? '' : this.formatDate(eduEnd); confidence = 1.0; }
+        else if (info.match(/grade|gpa|score|result/)) { value = entryData.grade || entryData.gpa || ''; confidence = 0.8; }
         else if (info.match(/description|detail|about/)) { value = entryData.description || ''; confidence = 0.8; }
       } else if (entryType === 'project') {
         if (info.match(/name|title|project name/)) { value = entryData.name || ''; confidence = 1.0; }

@@ -23,6 +23,13 @@ function init() {
   injectPanel();
 }
 
+// Toolbar icon click — force-open on any page regardless of URL pattern
+chrome.runtime.onMessage.addListener((message) => {
+  if (message.type !== 'FORCE_OPEN') return;
+  if (document.getElementById('job-agent-panel-container')) return;
+  injectPanel();
+});
+
 // Run on initial load
 init();
 
@@ -160,10 +167,21 @@ async function runFillCycle() {
     const { mappings, coverLetter } = resp;
     const flagged = [];
     let filled = 0;
+    const answeredQuestions = new Set();
 
     for (const mapping of mappings) {
       const { selector, value, confidence } = mapping;
       const fieldMeta = fields.find((f) => f.selector === selector) || {};
+
+      // Deduplicate fills driven by the same questionText — prevents one ATS question
+      // (e.g. Lever's card-level custom question) from being filled into every field
+      // in the same section when the question text bleeds across siblings.
+      const qt = fieldMeta.questionText;
+      if (qt && answeredQuestions.has(qt)) {
+        postToPanel({ type: 'FIELD_FILLED', selector, label: qt, value: '— already answered', filled: ++filled, total: mappings.length });
+        continue;
+      }
+      if (qt) answeredQuestions.add(qt);
 
       // Auto-fill file inputs — resume/CV gets the PDF; cover letter file fields are skipped
       if (fieldMeta.inputType === 'file') {
@@ -310,7 +328,7 @@ async function runFillCycle() {
 // ─── Structured section filler ───────────────────────────────────────────────
 
 const SECTION_TYPES = [
-  { type: 'experience', keywords: ['experience', 'work history', 'employment', 'work experience'] },
+  { type: 'experience', keywords: ['experience', 'work history', 'employment', 'work experience', 'employer'] },
   { type: 'education',  keywords: ['education', 'academic', 'degree', 'school', 'qualification'] },
   { type: 'project',    keywords: ['project', 'portfolio', 'work sample'] },
 ];
@@ -404,6 +422,15 @@ function getFieldLabel(el) {
 
 async function fillFieldEl(el, value, elementType, inputType, isCombobox) {
   if (!el || !document.contains(el)) return false;
+  const actualType = el.type || inputType;
+  if (actualType === 'checkbox') {
+    const shouldCheck = /^(yes|true|1|on)$/i.test(String(value).trim());
+    if (el.checked !== shouldCheck) {
+      el.click();
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    return true;
+  }
   if (elementType === 'select') {
     const lower = value.toLowerCase();
     for (const opt of el.options) {
@@ -423,10 +450,10 @@ async function fillFieldEl(el, value, elementType, inputType, isCombobox) {
     el.dispatchEvent(new Event('blur', { bubbles: true }));
     return true;
   }
-  const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value') &&
-    Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set ||
-    Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value') &&
-    Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+  const proto = el instanceof HTMLTextAreaElement
+    ? window.HTMLTextAreaElement.prototype
+    : window.HTMLInputElement.prototype;
+  const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
   if (setter) setter.call(el, value); else el.value = value;
   el.dispatchEvent(new Event('input', { bubbles: true }));
   el.dispatchEvent(new Event('change', { bubbles: true }));
@@ -493,6 +520,45 @@ function flattenEntryData(entry) {
   return flat;
 }
 
+// Build ExtensionField descriptors from actual DOM elements, preserving _el reference for direct filling.
+// This avoids querySelector failures on duplicate-named fields (e.g. Freshteam's [][field] pattern).
+function buildEntryFields(elements) {
+  const allEls = [...document.querySelectorAll('input,textarea,select,div[contenteditable="true"]')];
+  return elements.map((el, localIdx) => {
+    const tag = el.tagName.toLowerCase();
+    const inputType = tag === 'input' ? (el.type || 'text') : undefined;
+    if (['hidden', 'submit', 'button', 'reset'].includes(inputType)) return null;
+    const isContentEditable = tag === 'div' && el.getAttribute('contenteditable') === 'true';
+    const globalIdx = allEls.indexOf(el);
+    // getFieldLabel falls back to el.name when no real label exists — detect that and use
+    // friendlyLabel instead so the panel shows "Start Date" not the raw bracket notation.
+    const domLabel = getFieldLabel(el);
+    const label = (domLabel && domLabel !== el.name && domLabel !== el.placeholder && !domLabel.includes('['))
+      ? domLabel
+      : friendlyLabel(el.name);
+    return {
+      selector: makeSelector(el, globalIdx >= 0 ? globalIdx : localIdx),
+      elementType: isContentEditable ? 'div' : tag,
+      inputType,
+      isCombobox: (tag === 'input' && el.getAttribute('role') === 'combobox') || undefined,
+      fieldName: el.name || el.id || `field_${localIdx}`,
+      placeholder: el.placeholder || undefined,
+      label: label || undefined,
+      sectionHeading: typeof getSectionHeading === 'function' ? getSectionHeading(el) || undefined : undefined,
+      required: !!(el.required || el.getAttribute('aria-required') === 'true'),
+      options: tag === 'select' ? [...el.options].map(o => ({ value: o.value, text: (o.textContent || '').trim() })) : undefined,
+      _el: el,
+    };
+  }).filter(Boolean);
+}
+
+function friendlyLabel(name) {
+  if (!name) return '';
+  // Take the last bracket segment: applicant[...][][start_date] → "start_date" → "Start Date"
+  const last = name.split(/\]\[|\[|\]/).filter(Boolean).pop() || '';
+  return last.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
 async function fillStructuredSections(structuredResume) {
   for (const { type, keywords } of SECTION_TYPES) {
     const allEntries = structuredResume[type] || structuredResume[type + 's'] || [];
@@ -508,55 +574,62 @@ async function fillStructuredSections(structuredResume) {
     postToPanel({ type: 'STATUS', text: `Adding ${toAdd.length} ${type} ${toAdd.length > 1 ? 'entries' : 'entry'}...`, showSpinner: true });
 
     for (let i = 0; i < toAdd.length; i++) {
-      const entryData = flattenEntryData(toAdd[i]);
-      const resumeEntryIndex = alreadyFilled + i;
-      const isCurrentJob = type === 'experience' && resumeEntryIndex === 0 &&
-        (!entryData.endDate || entryData.endDate === 'Present' || entryData.endDate === '');
-
       const freshBtn = await findAddButtonWithRetry(keywords, 5, 600);
       if (!freshBtn) { console.warn('[JobAgent] Add button not found for', type, 'entry', i); break; }
 
-      // Start observing before click to catch all mutations
-      const newControlsPromise = waitForNewControls(4000);
+      // Snapshot all existing interactive elements so we can diff after click
+      const CTRL_SEL = 'input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="reset"]),textarea,select,div[contenteditable="true"]';
+      const beforeEls = new Set(document.querySelectorAll(CTRL_SEL));
+
+      const newControlsSignal = waitForNewControls(4000);
       freshBtn.scrollIntoViewIfNeeded && freshBtn.scrollIntoViewIfNeeded();
       freshBtn.click();
-      const newControls = await newControlsPromise;
+      await newControlsSignal; // wait until the first new element appears
+      await sleep(400);        // let all sibling fields finish rendering
 
-      if (!newControls.length) { console.warn('[JobAgent] No new controls after clicking Add for', type); continue; }
+      const newControls = [...document.querySelectorAll(CTRL_SEL)].filter(el => !beforeEls.has(el));
 
-      // Build field metadata from new DOM elements directly — no backend needed
-      const newFields = newControls.map((el, idx) => ({
-        el,
-        label: getFieldLabel(el),
-        placeholder: el.placeholder || '',
-        fieldName: el.name || el.id || ('field_' + idx),
-        elementType: el.tagName.toLowerCase(),
-        inputType: el.tagName.toLowerCase() === 'input' ? (el.type || 'text') : undefined,
-        isCombobox: el.getAttribute('role') === 'combobox',
-      }));
+      if (!newControls.length) { console.warn('[JobAgent] No new controls for', type, 'entry', i); continue; }
 
-      // Checkboxes first — they may show/hide other fields (e.g. end date)
-      const sorted = [
-        ...newFields.filter(f => f.inputType === 'checkbox'),
-        ...newFields.filter(f => f.inputType !== 'checkbox'),
-      ];
+      // Build field descriptors keeping _el so we fill by element reference, not querySelector.
+      // This is critical for ATSes (e.g. Freshteam) that repeat the same [name] for every entry.
+      const entryData = toAdd[i];
+      const entryEndVal = entryData.endDate || entryData.end || entryData.end_date || '';
+      const isCurrentEntry = !entryEndVal || entryEndVal === 'Present';
+      const entryFields = buildEntryFields(newControls);
+      if (!entryFields.length) continue;
 
-      for (const field of sorted) {
-        const { value, isCheckbox } = mapEntryField(field, type, entryData, isCurrentJob);
-        if (!document.contains(field.el)) continue;
+      const resp = await sendToBackground({
+        type: 'MAP_ENTRY_FIELDS',
+        payload: {
+          fields: entryFields.map(({ _el, ...f }) => f),
+          entryType: type,
+          entryData: flattenEntryData(entryData),
+          resumeText: '',
+          isCurrentJob: isCurrentEntry,
+        },
+      });
 
-        if (isCheckbox) {
-          const shouldCheck = value === 'true';
-          if (field.el.checked !== shouldCheck) { field.el.click(); await sleep(400); }
-          continue;
+      if (!resp.ok || !resp.mappings) {
+        console.warn('[JobAgent] MAP_ENTRY_FIELDS failed for', type, i, resp.error);
+      } else {
+        const fieldBySelector = new Map(entryFields.map(f => [f.selector, f]));
+        for (const mapping of resp.mappings) {
+          if (!mapping.value) continue;
+          const meta = fieldBySelector.get(mapping.selector) || {};
+          const el = meta._el;
+          const ok = el && document.contains(el)
+            ? await fillFieldEl(el, mapping.value, meta.elementType, meta.inputType, meta.isCombobox)
+            : await fillField(mapping.selector, mapping.value, meta.elementType, meta.inputType, meta.isCombobox);
+          postToPanel({
+            type: 'FIELD_FILLED',
+            selector: mapping.selector,
+            label: meta.label || meta.fieldName || mapping.selector,
+            value: ok ? mapping.value : '✗ failed',
+            filled: 0, total: 0,
+          });
+          await sleep(FILL_DELAY_MS);
         }
-
-        if (!value) continue;
-        // Skip end date for current job — it's hidden after the checkbox is checked
-        if (isCurrentJob && /end.*(?:date|mm)|^to$|until/i.test(field.label + ' ' + field.placeholder)) continue;
-
-        await fillFieldEl(field.el, value, field.elementType, field.inputType, field.isCombobox);
-        await sleep(FILL_DELAY_MS);
       }
 
       const saveBtn = findSaveButton(newControls);
@@ -646,13 +719,20 @@ async function onPanelMessage(event) {
 // ─── DOM helpers ─────────────────────────────────────────────────────────────
 
 function hasApplyForm() {
-  const url = window.location.href.toLowerCase();
-  if (!url.includes('apply') && !url.includes('application')) return false;
   const fields = document.querySelectorAll(
     'input:not([type="hidden"]):not([type="submit"]):not([type="button"]), textarea, select'
   );
   const hasSubmit = !!document.querySelector('button[type="submit"], input[type="submit"], button');
-  return fields.length > 3 && hasSubmit;
+  if (fields.length <= 3 || !hasSubmit) return false;
+
+  // Fast path: URL contains common job/apply keywords
+  const url = window.location.href.toLowerCase();
+  if (url.includes('apply') || url.includes('application') || url.includes('job') || url.includes('career')) return true;
+
+  // Generic fallback: check visible page text for job-application signals
+  const text = (document.body.innerText || '').toLowerCase().slice(0, 8000);
+  const signals = ['resume', 'curriculum vitae', ' cv ', 'work experience', 'education', 'cover letter', 'apply now', 'submit application', 'job application'];
+  return signals.filter(s => text.includes(s)).length >= 2;
 }
 
 function detectJobInfo() {
