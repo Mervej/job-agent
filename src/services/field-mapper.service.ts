@@ -397,7 +397,18 @@ export class FieldMapperService {
     if (aiMappings.length === 0) return mappings;
 
     // Resume in system prompt; each aiPrompt contains only the question + format hint.
-    const resumeSystemPrompt = `You are filling out a job application on behalf of a candidate. Answer using ONLY information from their resume below. Do not invent details.\n\nResume:\n${resumeText}`;
+    // Rules are explicit to work reliably with both small local models (qwen2.5:7b)
+    // and larger cloud models (llama-3.3-70b on Groq, gpt-4o-mini).
+    const resumeSystemPrompt = `You are filling out a job application on behalf of a candidate.
+Use ONLY information from the resume below. Do not invent or assume details.
+Output rules (must follow exactly):
+- Output ONLY the field value — no labels, no "Answer:", no "Based on the resume:", no preamble
+- Do not repeat or echo the question
+- Do not explain your reasoning
+- If the information is not in the resume, output an empty string
+
+Resume:
+${resumeText}`;
 
     for (const mapping of aiMappings) {
       const label = mapping.field.label || mapping.field.fieldName;
