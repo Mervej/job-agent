@@ -7,7 +7,9 @@ export default function Settings() {
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    getApiKey().then(setApiKey).catch(() => {});
+    getApiKey()
+      .then(setApiKey)
+      .catch(() => {});
   }, []);
 
   async function copy() {
@@ -19,13 +21,23 @@ export default function Settings() {
   return (
     <div style={{ maxWidth: 560 }}>
       <h1 style={{ fontSize: 22, fontWeight: 700, color: '#0f172a', marginBottom: 4 }}>Settings</h1>
-      <p style={{ color: '#64748b', marginBottom: 32 }}>Connect the Chrome extension to your account</p>
+      <p style={{ color: '#64748b', marginBottom: 32 }}>
+        Connect the Chrome extension to your account
+      </p>
 
-      <div style={{
-        background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 10,
-        padding: '16px 20px', marginBottom: 16, display: 'flex', alignItems: 'center',
-        justifyContent: 'space-between', gap: 16,
-      }}>
+      <div
+        style={{
+          background: '#eff6ff',
+          border: '1px solid #bfdbfe',
+          borderRadius: 10,
+          padding: '16px 20px',
+          marginBottom: 16,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 16,
+        }}
+      >
         <div>
           <p style={{ margin: '0 0 2px', fontSize: 14, fontWeight: 600, color: '#1e40af' }}>
             Don't have the extension yet?
@@ -35,10 +47,16 @@ export default function Settings() {
           </p>
         </div>
         <a
-          href="https://github.com/Mervej/job-agent/releases/download/v.1.0.1/job-agent-extension-v1.0.1.zip"
+          href="https://github.com/Mervej/job-agent/releases/download/v1.0.2/job-agent-extension-v1.0.2.zips"
           style={{
-            whiteSpace: 'nowrap', padding: '9px 18px', background: '#2563eb', color: '#fff',
-            borderRadius: 7, fontSize: 13, fontWeight: 600, textDecoration: 'none',
+            whiteSpace: 'nowrap',
+            padding: '9px 18px',
+            background: '#2563eb',
+            color: '#fff',
+            borderRadius: 7,
+            fontSize: 13,
+            fontWeight: 600,
+            textDecoration: 'none',
             flexShrink: 0,
           }}
         >
@@ -46,8 +64,17 @@ export default function Settings() {
         </a>
       </div>
 
-      <div style={{ background: '#fff', borderRadius: 10, padding: 24, boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
-        <h2 style={{ fontSize: 15, fontWeight: 600, color: '#0f172a', margin: '0 0 4px' }}>API Key</h2>
+      <div
+        style={{
+          background: '#fff',
+          borderRadius: 10,
+          padding: 24,
+          boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
+        }}
+      >
+        <h2 style={{ fontSize: 15, fontWeight: 600, color: '#0f172a', margin: '0 0 4px' }}>
+          API Key
+        </h2>
         <p style={{ fontSize: 13, color: '#64748b', margin: '0 0 16px' }}>
           Paste this key into the Job Agent Chrome extension settings once — it never expires.
         </p>
@@ -58,17 +85,32 @@ export default function Settings() {
             value={apiKey}
             readOnly
             style={{
-              flex: 1, padding: '8px 12px', borderRadius: 6, border: '1px solid #e2e8f0',
-              fontSize: 14, fontFamily: 'monospace', background: '#f8fafc', color: '#0f172a',
+              flex: 1,
+              padding: '8px 12px',
+              borderRadius: 6,
+              border: '1px solid #e2e8f0',
+              fontSize: 14,
+              fontFamily: 'monospace',
+              background: '#f8fafc',
+              color: '#0f172a',
             }}
           />
-          <button onClick={() => setRevealed(r => !r)} style={ghostBtn}>
+          <button onClick={() => setRevealed((r) => !r)} style={ghostBtn}>
             {revealed ? 'Hide' : 'Show'}
           </button>
-          <button onClick={copy} style={{
-            padding: '8px 16px', background: '#3b82f6', color: '#fff',
-            border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 500,
-          }}>
+          <button
+            onClick={copy}
+            style={{
+              padding: '8px 16px',
+              background: '#3b82f6',
+              color: '#fff',
+              border: 'none',
+              borderRadius: 6,
+              cursor: 'pointer',
+              fontSize: 13,
+              fontWeight: 500,
+            }}
+          >
             {copied ? 'Copied ✓' : 'Copy'}
           </button>
         </div>
@@ -84,12 +126,26 @@ export default function Settings() {
             'Click the gear (⚙) icon in the panel',
             'Paste the key and click Save',
           ].map((step, i) => (
-            <div key={i} style={{ display: 'flex', gap: 10, marginBottom: 6, fontSize: 13, color: '#475569' }}>
-              <span style={{
-                minWidth: 20, height: 20, background: '#3b82f6', color: '#fff',
-                borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: 11, fontWeight: 600,
-              }}>{i + 1}</span>
+            <div
+              key={i}
+              style={{ display: 'flex', gap: 10, marginBottom: 6, fontSize: 13, color: '#475569' }}
+            >
+              <span
+                style={{
+                  minWidth: 20,
+                  height: 20,
+                  background: '#3b82f6',
+                  color: '#fff',
+                  borderRadius: '50%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: 11,
+                  fontWeight: 600,
+                }}
+              >
+                {i + 1}
+              </span>
               {step}
             </div>
           ))}
@@ -100,6 +156,11 @@ export default function Settings() {
 }
 
 const ghostBtn: React.CSSProperties = {
-  padding: '8px 12px', background: 'transparent', color: '#64748b',
-  border: '1px solid #e2e8f0', borderRadius: 6, cursor: 'pointer', fontSize: 13,
+  padding: '8px 12px',
+  background: 'transparent',
+  color: '#64748b',
+  border: '1px solid #e2e8f0',
+  borderRadius: 6,
+  cursor: 'pointer',
+  fontSize: 13,
 };
