@@ -3,8 +3,12 @@
 #
 # After pushing this repo to GitHub:
 #   Render Dashboard → New → Blueprint → pick this repo → Apply.
-# Render reads this file and provisions the service. You'll be prompted for
-# the secret env vars marked `sync: false`.
+#
+# Secrets are stored in an Environment Group called "job-agent-secrets" so they
+# survive Blueprint resyncs. Create the group in:
+#   Render Dashboard → Account Settings → Environment Groups → New
+# Add these keys there: GROQ_API_KEY, SUPABASE_ANON_KEY,
+#   SUPABASE_SERVICE_ROLE_KEY, VITE_SUPABASE_ANON_KEY
 
 services:
   - type: web
@@ -15,6 +19,8 @@ services:
     startCommand: npm start
     healthCheckPath: /health
     autoDeploy: true
+    envVarGroups:
+      - job-agent-secrets
     envVars:
       - key: PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD
         value: "1"
@@ -22,17 +28,9 @@ services:
         value: groq
       - key: AI_MODEL
         value: llama-3.3-70b-versatile
-      - key: GROQ_API_KEY
-        sync: false
       - key: USE_STAGEHAND
         value: "false"
       - key: SUPABASE_URL
         value: https://mkokkgtjyanotnctguqe.supabase.co
-      - key: SUPABASE_ANON_KEY
-        sync: false
-      - key: SUPABASE_SERVICE_ROLE_KEY
-        sync: false
       - key: VITE_SUPABASE_URL
         value: https://mkokkgtjyanotnctguqe.supabase.co
-      - key: VITE_SUPABASE_ANON_KEY
-        sync: false
