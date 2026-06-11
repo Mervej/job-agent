@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Session } from '@supabase/supabase-js';
-import { supabase } from './lib/supabase';
+import { supabase, supabaseReady } from './lib/supabase';
 import Login from './pages/Login';
 import AuthCallback from './pages/AuthCallback';
 import Dashboard from './pages/Dashboard';
@@ -13,9 +13,20 @@ export default function App() {
   const [session, setSession] = useState<Session | null | undefined>(undefined);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => setSession(data.session));
+    if (!supabaseReady) {
+      setSession(null);
+      return;
+    }
+    const timeout = setTimeout(() => setSession(null), 5000);
+    supabase.auth.getSession().then(({ data }) => {
+      clearTimeout(timeout);
+      setSession(data.session);
+    }).catch(() => {
+      clearTimeout(timeout);
+      setSession(null);
+    });
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_, s) => setSession(s));
-    return () => subscription.unsubscribe();
+    return () => { subscription.unsubscribe(); clearTimeout(timeout); };
   }, []);
 
   if (session === undefined) return <div className="loading">Loading…</div>;
