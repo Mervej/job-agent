@@ -47,7 +47,7 @@ export default function Settings() {
           </p>
         </div>
         <a
-          href="https://github.com/Mervej/job-agent/releases/download/v1.0.2/job-agent-extension-v1.0.2.zips"
+          href="https://github.com/Mervej/job-agent/releases/download/v1.0.2/job-agent-extension-v1.0.2.zip"
           style={{
             whiteSpace: 'nowrap',
             padding: '9px 18px',
