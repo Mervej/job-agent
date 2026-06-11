@@ -15,7 +15,7 @@ services:
     name: job-agent-backend
     runtime: node
     plan: free
-    buildCommand: npm install --include=dev && npm run build && cd web && npm install && npm run build
+    buildCommand: npm install --include=dev && npm run build
     startCommand: npm start
     healthCheckPath: /health
     autoDeploy: true
@@ -32,5 +32,30 @@ services:
         value: "false"
       - key: SUPABASE_URL
         value: https://mkokkgtjyanotnctguqe.supabase.co
+      - key: FRONTEND_URL
+        fromService:
+          name: job-agent-frontend
+          type: web
+          property: host
+
+  - type: web
+    name: job-agent-frontend
+    runtime: static
+    buildCommand: cd web && npm install && npm run build
+    staticPublishPath: ./web/dist
+    pullRequestPreviewsEnabled: false
+    autoDeploy: true
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVarGroups:
+      - job-agent-secrets
+    envVars:
       - key: VITE_SUPABASE_URL
         value: https://mkokkgtjyanotnctguqe.supabase.co
+      - key: VITE_API_URL
+        fromService:
+          name: job-agent-backend
+          type: web
+          property: host
