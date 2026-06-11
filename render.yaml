@@ -12,13 +12,11 @@ services:
     name: job-agent-backend
     runtime: node
     plan: free
-    buildCommand: npm install --include=dev && npm run build
+    buildCommand: npm install --include=dev && npm run build && npx playwright install --with-deps chromium
     startCommand: npm start
     healthCheckPath: /health
     autoDeploy: true
     envVars:
-      - key: PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD
-        value: "1"
       - key: AI_PROVIDER
         value: groq
       - key: AI_MODEL

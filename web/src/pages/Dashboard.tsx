@@ -52,7 +52,7 @@ export default function Dashboard() {
       {/* Cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 20, marginBottom: 40 }}>
         <StatCard icon="👤" label="Profile" value={hasProfile ? 'Set up' : 'Not set up'} ok={hasProfile} to="/profile" action="Edit profile" />
-        <StatCard icon="🔑" label="Extension" value="Get API key" ok={true} to="/settings" action="View key" />
+        <StatCard icon="🔑" label="Extension" value="Download & connect" ok={true} to="/settings" action="Set up" href="https://github.com/Mervej/job-agent/releases/download/v.1.0.1/job-agent-extension-v1.0.1.zip" />
         <StatCard icon="📋" label="Applications" value="0 filled" ok={true} />
       </div>
 
@@ -82,8 +82,8 @@ export default function Dashboard() {
   );
 }
 
-function StatCard({ icon, label, value, ok, to, action }: {
-  icon: string; label: string; value: string; ok: boolean; to?: string; action?: string;
+function StatCard({ icon, label, value, ok, to, action, href }: {
+  icon: string; label: string; value: string; ok: boolean; to?: string; action?: string; href?: string;
 }) {
   return (
     <div style={{
@@ -97,10 +97,15 @@ function StatCard({ icon, label, value, ok, to, action }: {
         <span style={{ fontSize: 20 }}>{icon}</span>
         <span style={{ fontSize: 13, color: '#64748b', fontWeight: 500 }}>{label}</span>
       </div>
-      <div style={{ fontSize: 20, fontWeight: 700, color: '#0f172a', marginBottom: to ? 12 : 0 }}>{value}</div>
-      {to && action && (
-        <Link to={to} style={{ fontSize: 13, color: '#3b82f6', fontWeight: 500 }}>{action} →</Link>
-      )}
+      <div style={{ fontSize: 20, fontWeight: 700, color: '#0f172a', marginBottom: to || href ? 12 : 0 }}>{value}</div>
+      <div style={{ display: 'flex', gap: 12 }}>
+        {href && (
+          <a href={href} download style={{ fontSize: 13, color: '#3b82f6', fontWeight: 500 }}>Download →</a>
+        )}
+        {to && action && (
+          <Link to={to} style={{ fontSize: 13, color: '#3b82f6', fontWeight: 500 }}>{action} →</Link>
+        )}
+      </div>
     </div>
   );
 }

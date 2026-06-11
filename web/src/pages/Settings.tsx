@@ -21,6 +21,31 @@ export default function Settings() {
       <h1 style={{ fontSize: 22, fontWeight: 700, color: '#0f172a', marginBottom: 4 }}>Settings</h1>
       <p style={{ color: '#64748b', marginBottom: 32 }}>Connect the Chrome extension to your account</p>
 
+      <div style={{
+        background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 10,
+        padding: '16px 20px', marginBottom: 16, display: 'flex', alignItems: 'center',
+        justifyContent: 'space-between', gap: 16,
+      }}>
+        <div>
+          <p style={{ margin: '0 0 2px', fontSize: 14, fontWeight: 600, color: '#1e40af' }}>
+            Don't have the extension yet?
+          </p>
+          <p style={{ margin: 0, fontSize: 13, color: '#3b82f6' }}>
+            Download and install it first, then paste your API key below.
+          </p>
+        </div>
+        <a
+          href="https://github.com/Mervej/job-agent/releases/download/v.1.0.1/job-agent-extension-v1.0.1.zip"
+          style={{
+            whiteSpace: 'nowrap', padding: '9px 18px', background: '#2563eb', color: '#fff',
+            borderRadius: 7, fontSize: 13, fontWeight: 600, textDecoration: 'none',
+            flexShrink: 0,
+          }}
+        >
+          Download Extension
+        </a>
+      </div>
+
       <div style={{ background: '#fff', borderRadius: 10, padding: 24, boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
         <h2 style={{ fontSize: 15, fontWeight: 600, color: '#0f172a', margin: '0 0 4px' }}>API Key</h2>
         <p style={{ fontSize: 13, color: '#64748b', margin: '0 0 16px' }}>
@@ -53,6 +78,7 @@ export default function Settings() {
             How to connect the extension
           </p>
           {[
+            'Download and install the extension using the button above',
             'Copy the API key above',
             'Open Chrome and click the Job Agent icon in the toolbar',
             'Click the gear (⚙) icon in the panel',

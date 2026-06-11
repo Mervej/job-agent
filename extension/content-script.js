@@ -14,7 +14,10 @@ let _flaggedFieldMeta = {}; // selector → fieldMeta, populated when flagging, 
 
 // ─── Bootstrap ───────────────────────────────────────────────────────────────
 
+const OWN_ORIGINS = ['job-agent-frontend.onrender.com', 'job-agent-backend-jg3v.onrender.com'];
+
 function init() {
+  if (OWN_ORIGINS.some(o => window.location.hostname === o)) return;
   if (!isApplyPage(window.location.href) && !hasApplyForm()) return;
 
   // Avoid double-injection on re-runs
