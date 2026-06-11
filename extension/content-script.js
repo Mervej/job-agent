@@ -11,6 +11,9 @@ let panelContainer = null;
 let activeResumeId = null;
 let isFilling = false;
 let _flaggedFieldMeta = {}; // selector → fieldMeta, populated when flagging, used in CONTINUE
+let _pendingNavigation = false; // set before intentional Apply-button navigation so MutationObserver restarts the flow
+let _profileName = ''; // full name from backend profile, used for resume filename
+let _jobCompany = ''; // company name used for cover letter filename
 
 // ─── Bootstrap ───────────────────────────────────────────────────────────────
 
@@ -41,7 +44,18 @@ let _lastUrl = location.href;
 new MutationObserver(() => {
   if (location.href !== _lastUrl) {
     _lastUrl = location.href;
-    init();
+    if (_pendingNavigation) {
+      // We intentionally navigated from a JD page — restart the full flow on the new page
+      _pendingNavigation = false;
+      isFilling = false;
+      if (document.getElementById('job-agent-panel-container')) {
+        startFlow();
+      } else {
+        init();
+      }
+    } else if (!document.getElementById('job-agent-panel-container')) {
+      init();
+    }
   }
 }).observe(document.documentElement, { subtree: true, childList: true });
 
@@ -82,6 +96,7 @@ function injectPanel() {
 
 async function startFlow() {
   const { jobTitle, jobCompany } = detectJobInfo();
+  _jobCompany = jobCompany || '';
 
   // Gate 1: API key must exist before hitting the backend
   const { apiKey } = await sendToBackground({ type: 'GET_API_KEY' });
@@ -126,39 +141,107 @@ async function waitForFields(maxWaitMs = 12000) {
   return extractFields(document); // final attempt
 }
 
+function extractJobDescriptionText() {
+  const SECTION_SELECTORS = [
+    '[class*="job-description"]', '[class*="jobDescription"]',
+    '[id*="job-description"]', '[id*="jobDescription"]',
+    '[data-automation="jobAdDetails"]', '[data-testid*="description"]',
+    'article', '[role="main"]', 'main',
+  ];
+  for (const sel of SECTION_SELECTORS) {
+    const el = document.querySelector(sel);
+    if (el) {
+      const text = (el.innerText || '').trim();
+      if (text.length > 300) return text.slice(0, 6000);
+    }
+  }
+  return (document.body.innerText || '').slice(0, 6000);
+}
+
+function findApplyButton() {
+  const EXACT_TEXTS = ['apply now', 'apply for this job', 'apply for job', 'apply to this position', 'apply here', 'easy apply', 'quick apply', 'start application', 'apply online', 'apply'];
+  const candidates = [...document.querySelectorAll('a[href], button, [role="button"]')];
+  for (const el of candidates) {
+    const text = (el.textContent || el.getAttribute('aria-label') || '').trim().toLowerCase();
+    if (EXACT_TEXTS.includes(text)) return el;
+  }
+  for (const el of candidates) {
+    const text = (el.textContent || el.getAttribute('aria-label') || '').trim().toLowerCase();
+    if (/\bapply\b/.test(text) && text.length < 30) return el;
+  }
+  return null;
+}
+
+async function handleNoFieldsPage() {
+  // Form is likely embedded in a cross-origin iframe — redirect to it directly
+  const atsFrame = [...document.querySelectorAll('iframe')].find(f => {
+    const src = f.src || '';
+    return src.includes('ashbyhq.com') ||
+           src.includes('greenhouse.io') ||
+           src.includes('lever.co') ||
+           src.includes('myworkdayjobs.com') ||
+           src.includes('smartrecruiters.com');
+  });
+  if (atsFrame?.src) {
+    postToPanel({ type: 'STATUS', text: 'Opening application form…', showSpinner: true });
+    await saveJdAndNavigate(() => setTimeout(() => { window.location.href = atsFrame.src; }, 600));
+    return;
+  }
+
+  // Try to find an Apply button and navigate to the actual form
+  const applyBtn = findApplyButton();
+  if (applyBtn) {
+    postToPanel({ type: 'STATUS', text: 'JD captured — navigating to application form…', showSpinner: true });
+    await saveJdAndNavigate(() => { applyBtn.click(); });
+    return;
+  }
+
+  postToPanel({ type: 'STATUS', text: 'No form fields found on this page.', showSpinner: false });
+  isFilling = false;
+}
+
+async function saveJdAndNavigate(navigateFn) {
+  const { jobTitle, jobCompany } = detectJobInfo();
+  const text = extractJobDescriptionText();
+  await sendToBackground({
+    type: 'SAVE_JD',
+    jd: { url: window.location.href, text, title: jobTitle, company: jobCompany },
+  });
+  _pendingNavigation = true;
+  navigateFn();
+}
+
 async function runFillCycle() {
   if (isFilling) return;
   isFilling = true;
 
   try {
+    // Fast-path: known JD pages will never have form fields — skip the 12-second wait
+    if (isJobDescriptionPage(window.location.href)) {
+      postToPanel({ type: 'STATUS', text: 'Job description page — looking for Apply button…', showSpinner: true });
+      await sleep(800); // brief wait for SPA to settle
+      await handleNoFieldsPage();
+      return;
+    }
+
     postToPanel({ type: 'STATUS', text: 'Waiting for form to load...', showSpinner: true });
 
     const fields = await waitForFields();
     if (fields.length === 0) {
-      // Form is likely embedded in a cross-origin iframe — redirect to it directly
-      const atsFrame = [...document.querySelectorAll('iframe')].find(f => {
-        const src = f.src || '';
-        return src.includes('ashbyhq.com') ||
-               src.includes('greenhouse.io') ||
-               src.includes('lever.co') ||
-               src.includes('myworkdayjobs.com') ||
-               src.includes('smartrecruiters.com');
-      });
-      if (atsFrame?.src) {
-        postToPanel({ type: 'STATUS', text: 'Opening application form…', showSpinner: true });
-        setTimeout(() => { window.location.href = atsFrame.src; }, 600);
-        return;
-      }
-      postToPanel({ type: 'STATUS', text: 'No form fields found on this page.', showSpinner: false });
-      isFilling = false;
+      await handleNoFieldsPage();
       return;
     }
 
     postToPanel({ type: 'STATUS', text: `Found ${fields.length} fields, mapping with AI...`, showSpinner: true });
 
+    // Use stored JD URL/text if available (set when navigated from a JD page)
+    const { jd: storedJD } = await sendToBackground({ type: 'GET_JD' });
+    const jobUrl = storedJD?.url || window.location.href;
+    const jobText = storedJD?.text || null;
+
     const resp = await sendToBackground({
       type: 'MAP_FIELDS',
-      payload: { fields, resumeId: activeResumeId, jobUrl: window.location.href },
+      payload: { fields, resumeId: activeResumeId, jobUrl, jobText },
     });
 
     if (!resp.ok) {
@@ -166,6 +249,13 @@ async function runFillCycle() {
       isFilling = false;
       return;
     }
+
+    // JD has been used — clear it so it doesn't bleed into subsequent pages
+    if (storedJD) await sendToBackground({ type: 'CLEAR_JD' });
+
+    // Store profile name for resume filename; update company from stored JD if richer
+    if (resp.profileName) _profileName = resp.profileName;
+    if (storedJD?.company) _jobCompany = storedJD.company;
 
     const { mappings, coverLetter } = resp;
     const flagged = [];
@@ -214,7 +304,7 @@ async function runFillCycle() {
           // No text field — generate and upload a cover letter PDF if we have the text
           let clValue = '— no cover letter generated';
           if (coverLetter && coverLetter.trim().length > 50) {
-            const clResp = await sendToBackground({ type: 'FETCH_COVER_LETTER_PDF', text: coverLetter });
+            const clResp = await sendToBackground({ type: 'FETCH_COVER_LETTER_PDF', text: coverLetter, companyName: _jobCompany });
             if (clResp.ok) {
               const ok = await fillField(selector, `${clResp.base64},${clResp.filename}`, 'input', 'file', false);
               clValue = ok ? '✓ uploaded PDF' : '✗ upload failed';
@@ -235,7 +325,7 @@ async function runFillCycle() {
         }
 
         // Resume / CV — fetch PDF from backend via background service worker
-        const fileResp = await sendToBackground({ type: 'FETCH_RESUME_FILE', resumeId: activeResumeId });
+        const fileResp = await sendToBackground({ type: 'FETCH_RESUME_FILE', resumeId: activeResumeId, profileName: _profileName });
         const ok = fileResp.ok
           ? await fillField(selector, `${fileResp.base64},${fileResp.filename}`, 'input', 'file', false)
           : false;

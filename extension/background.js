@@ -44,8 +44,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   const handlers = {
     FETCH_RESUMES:       () => handleFetchResumes(sendResponse),
     MAP_FIELDS:          () => handleMapFields(message.payload, sendResponse),
-    FETCH_RESUME_FILE:   () => handleFetchResumeFile(message.resumeId, sendResponse),
-    FETCH_COVER_LETTER_PDF: () => handleFetchCoverLetterPdf(message.text, sendResponse),
+    FETCH_RESUME_FILE:   () => handleFetchResumeFile(message.resumeId, message.profileName, sendResponse),
+    FETCH_COVER_LETTER_PDF: () => handleFetchCoverLetterPdf(message.text, message.companyName, sendResponse),
     MAP_ENTRY_FIELDS:    () => handleMapEntryFields(message.payload, sendResponse),
     SAVE_API_KEY: () => {
       chrome.storage.local.set({ apiKey: message.apiKey }, () => sendResponse({ ok: true }));
@@ -62,6 +62,16 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     GET_RESUME_ID: () => {
       chrome.storage.local.get('activeResumeId', (d) => sendResponse({ resumeId: d.activeResumeId ?? null }));
       return true;
+    },
+    SAVE_JD: () => {
+      chrome.storage.local.set({ pendingJD: message.jd }, () => sendResponse({ ok: true }));
+    },
+    GET_JD: () => {
+      chrome.storage.local.get('pendingJD', (d) => sendResponse({ jd: d.pendingJD ?? null }));
+      return true;
+    },
+    CLEAR_JD: () => {
+      chrome.storage.local.remove('pendingJD', () => sendResponse({ ok: true }));
     },
   };
 
@@ -89,7 +99,7 @@ async function handleFetchResumes(sendResponse) {
   }
 }
 
-async function handleFetchResumeFile(resumeId, sendResponse) {
+async function handleFetchResumeFile(resumeId, profileName, sendResponse) {
   try {
     const url = await backendReady;
     const { apiKey } = await chrome.storage.local.get('apiKey');
@@ -98,7 +108,10 @@ async function handleFetchResumeFile(resumeId, sendResponse) {
     });
     if (!res.ok) throw new Error(`Backend returned ${res.status}`);
     const buffer = await res.arrayBuffer();
-    sendResponse({ ok: true, base64: arrayBufferToBase64(buffer), filename: `resume-${resumeId}.pdf` });
+    const safeName = profileName
+      ? profileName.trim().replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_-]/g, '')
+      : `resume-${resumeId}`;
+    sendResponse({ ok: true, base64: arrayBufferToBase64(buffer), filename: `${safeName}.pdf` });
   } catch (err) {
     sendResponse({ ok: false, error: err.message });
   }
@@ -120,7 +133,7 @@ async function handleMapEntryFields({ fields, entryType, entryData, resumeText, 
   }
 }
 
-async function handleFetchCoverLetterPdf(text, sendResponse) {
+async function handleFetchCoverLetterPdf(text, companyName, sendResponse) {
   try {
     const url = await backendReady;
     const res = await fetch(`${url}/apply/cover-letter-pdf`, {
@@ -130,19 +143,23 @@ async function handleFetchCoverLetterPdf(text, sendResponse) {
     });
     if (!res.ok) throw new Error(`Backend returned ${res.status}`);
     const buffer = await res.arrayBuffer();
-    sendResponse({ ok: true, base64: arrayBufferToBase64(buffer), filename: 'cover-letter.pdf' });
+    const safeCompany = companyName
+      ? companyName.trim().replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_-]/g, '')
+      : '';
+    const filename = safeCompany ? `${safeCompany}_cover_letter.pdf` : 'cover_letter.pdf';
+    sendResponse({ ok: true, base64: arrayBufferToBase64(buffer), filename });
   } catch (err) {
     sendResponse({ ok: false, error: err.message });
   }
 }
 
-async function handleMapFields({ fields, resumeId, jobUrl }, sendResponse) {
+async function handleMapFields({ fields, resumeId, jobUrl, jobText }, sendResponse) {
   try {
     const url = await backendReady;
     const res = await fetch(`${url}/apply/map-fields`, {
       method: 'POST',
       headers: await authHeaders(),
-      body: JSON.stringify({ fields, resumeId, jobUrl }),
+      body: JSON.stringify({ fields, resumeId, jobUrl, ...(jobText ? { jobText } : {}) }),
     });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));

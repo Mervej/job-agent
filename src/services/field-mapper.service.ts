@@ -34,6 +34,7 @@ export interface MapFieldsResult {
   resumeDownloadUrl: string;
   structuredResume: any | null;
   resumeText: string;
+  profileName: string;
 }
 
 export interface EntryMappedField {
@@ -459,7 +460,8 @@ ${resumeText}`;
   async mapFields(
     fields: ExtensionField[],
     resumeId: string,
-    jobUrl: string
+    jobUrl: string,
+    jobText?: string
   ): Promise<MapFieldsResult> {
     const { data: resume, error: resumeErr } = await supabase
       .from('resumes')
@@ -500,15 +502,24 @@ ${resumeText}`;
       skills: Array.isArray(profile?.skills) ? profile.skills : [],
     };
 
-    const jobCrawler = new JobCrawler();
     const coverLetterGenerator = new CoverLetterGenerator();
     let coverLetter = '';
 
     try {
-      const jobDescription = await jobCrawler.crawlJobDescription(jobUrl);
+      let jobDescription;
+      if (jobText && jobText.trim().length > 100) {
+        jobDescription = { title: '', company: '', description: jobText, url: jobUrl };
+      } else {
+        const jobCrawler = new JobCrawler();
+        try {
+          jobDescription = await jobCrawler.crawlJobDescription(jobUrl);
+        } finally {
+          await jobCrawler.close();
+        }
+      }
       coverLetter = await coverLetterGenerator.generateCoverLetter(jobDescription, userProfile, resumeText);
-    } finally {
-      await jobCrawler.close();
+    } catch {
+      // Cover letter generation failure is non-fatal — proceed without it
     }
 
     const mappings = this.mapFieldsToData(fields, userProfile, coverLetter, resumeText, structuredResume);
@@ -526,6 +537,7 @@ ${resumeText}`;
       resumeDownloadUrl: `/resumes/${resumeId}/file`,
       structuredResume,
       resumeText,
+      profileName: profile?.full_name || '',
     };
   }
 

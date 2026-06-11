@@ -55,6 +55,7 @@ Do NOT include explanations — output only the final cover letter.
     //
     const userPrompt = this.buildUserPrompt(jobDescription, userProfile, resumeText);
 
+    console.log('[CoverLetter] prompt >>>\n' + userPrompt + '\n<<<');
     const result = await generateText(systemPrompt, userPrompt);
     return result;
   }
@@ -73,7 +74,7 @@ Write a tailored cover letter based on the following structured data.
 ${job.description || 'Not provided'}
 
 ### KEY REQUIREMENTS
-${job.requirements?.join(', ') || 'Not specified'}
+Not specified
 
 ### CANDIDATE PROFILE
 - Name: ${user.name}
