@@ -26,7 +26,9 @@ export class CoverLetterGenerator {
   async generateCoverLetter(
     jobDescription: JobDescription,
     userProfile: UserProfile,
-    resumeText: string
+    resumeText: string,
+    _jdSummary?: string,
+    _structuredResume?: unknown
   ): Promise<string> {
     //
     // SYSTEM PROMPT (goes to {{ .System }} in your Modelfile)

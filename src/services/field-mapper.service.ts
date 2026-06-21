@@ -1,4 +1,4 @@
-import { generateText } from './ai.service';
+import { generateText, generateStructuredFields, extractJDRequirements, FieldSpec } from './ai.service';
 import { JobCrawler } from './job-crawler';
 import { CoverLetterGenerator, UserProfile } from './cover-letter-generator';
 import { supabase } from './supabase';
@@ -116,6 +116,40 @@ function buildAiFieldPrompt(question: string): string {
   }
 
   return `Fill in this job application field: "${question}"\n\n${hint}`;
+}
+
+// ─── Batch AI format hint builder ────────────────────────────────────────────
+
+function buildFormatHint(field: ExtensionField): string {
+  const validOptions = (field.options || []).filter(
+    o => o.text?.trim() && !/^(-+|select\.?\.?\.?|choose\.?\.?\.?|please select)$/i.test(o.text.trim())
+  );
+  if (validOptions.length > 0) {
+    return `respond with EXACTLY one of these options: ${validOptions.map(o => o.text).join(' | ')}`;
+  }
+
+  const question = (field.questionText || field.label || field.fieldName).replace(/[✱*]+$/, '').trim();
+  const q = question.toLowerCase();
+
+  if (question.includes('?') && /\b(do you|have you|are you|will you|can you|is your|did you|would you|are there)\b/i.test(question)) {
+    return 'Yes or No only';
+  }
+  if (/\b(cgpa|gpa|percentage|score|grade)\b/.test(q) || (/\b%\b/.test(q) && !question.includes('?'))) {
+    return 'value only, e.g. "8.5 CGPA" or "76%"';
+  }
+  if (/\btotal.*year|\byears? of experience|\bexperience.*year/.test(q)) {
+    return 'number only, e.g. "8"';
+  }
+  if (/\b(year|date|month|when)\b/.test(q) && !question.includes('?')) {
+    return 'MM/YYYY format only, e.g. "06/2019"';
+  }
+  if (/\b(list|all|mention|companies|achievements|provide all)\b/i.test(question)) {
+    return 'clean list, one item per line';
+  }
+  if (question.length < 50 && !question.includes('?')) {
+    return 'value only, no labels or extra text';
+  }
+  return '1-3 sentences, first person, no preamble or explanation';
 }
 
 // ─── Service ──────────────────────────────────────────────────────────────────
@@ -342,6 +376,12 @@ export class FieldMapperService {
         aiPrompt = buildAiFieldPrompt(question);
       }
 
+      // Promote empty required Tier-1 answers to AI batch
+      if (DIRECT_TYPES.has(semanticType) && !needsAI && (mappedData === '' || mappedData === undefined) && field.required) {
+        needsAI = true;
+        aiPrompt = undefined;
+      }
+
       // ── Options handling: try to match mapped value; fall back to AI pick ─────
       const validOptions = (field.options || []).filter(
         (o) => o.text && o.text.trim() && !/^(-+|select\.?\.?\.?|choose\.?\.?\.?|please select)$/i.test(o.text.trim())
@@ -392,65 +432,34 @@ export class FieldMapperService {
 
   private async generateAnswersForAIFields(
     mappings: FieldMapping[],
-    resumeText: string
+    resumeText: string,
+    structuredResume: StructuredResume,
+    jdSummary: string
   ): Promise<FieldMapping[]> {
-    const aiMappings = mappings.filter((m) => m.needsAI && m.aiPrompt);
+    const aiMappings = mappings.filter(m => m.needsAI);
     if (aiMappings.length === 0) return mappings;
 
-    // Resume in system prompt; each aiPrompt contains only the question + format hint.
-    // Rules are explicit to work reliably with both small local models (qwen2.5:7b)
-    // and larger cloud models (llama-3.3-70b on Groq, gpt-4o-mini).
-    const resumeSystemPrompt = `You are filling out a job application on behalf of a candidate.
-Use ONLY information from the resume below. Do not invent or assume details.
-Output rules (must follow exactly):
-- Output ONLY the field value — no labels, no "Answer:", no "Based on the resume:", no preamble
-- Do not repeat or echo the question
-- Do not explain your reasoning
-- If the information is not in the resume, output an empty string
+    const fieldSpecs: FieldSpec[] = aiMappings.map((m, i) => ({
+      id: `f${i}`,
+      label: m.field.questionText || m.field.label || m.field.fieldName,
+      formatHint: buildFormatHint(m.field),
+    }));
 
-Resume:
-${resumeText}`;
+    const answers = await generateStructuredFields(fieldSpecs, structuredResume, jdSummary);
 
-    for (const mapping of aiMappings) {
-      const label = mapping.field.label || mapping.field.fieldName;
-      const validOptions = (mapping.field.options || []).filter(
-        (o) => o.text?.trim() && !/^(-+|select\.?\.?\.?|choose\.?\.?\.?|please select)$/i.test(o.text.trim())
+    for (let i = 0; i < aiMappings.length; i++) {
+      const answer = answers[`f${i}`];
+      if (!answer?.trim()) continue;
+
+      const validOptions = (aiMappings[i].field.options || []).filter(
+        o => o.text?.trim() && !/^(-+|select\.?\.?\.?|choose\.?\.?\.?|please select)$/i.test(o.text.trim())
       );
-      const hasOptions = validOptions.length > 0;
 
-      try {
-        const semanticType = this.getFieldSemanticType(mapping.field);
-        const maxTokens = semanticType === 'summary' ? 300 : 150;
-
-        let answer: string;
-        if (hasOptions) {
-          console.log(`[FieldMapper] AI (options) | selector: ${mapping.field.selector} | label: ${label} | prompt:\n${mapping.aiPrompt}`);
-          answer = await generateText('You are filling a job application form.', mapping.aiPrompt!, maxTokens);
-        } else if (mapping.aiPrompt) {
-          // Use the context-rich prompt crafted in mapFieldsToData — it already contains the
-          // right question text, resume context, and field-specific instructions.
-          console.log(`[FieldMapper] AI | selector: ${mapping.field.selector} | label: "${label}" | using aiPrompt`);
-          answer = await generateText(resumeSystemPrompt, mapping.aiPrompt, maxTokens);
-          console.log(`[FieldMapper] AI response for "${label}": "${answer?.trim()}"`);
-        } else {
-          // Fallback for fields that reached needsAI=true without an aiPrompt
-          const fieldLabel = mapping.field.label || mapping.field.placeholder || mapping.field.fieldName;
-          const finalPrompt = `Fill in this job application field: "${fieldLabel}". Respond with ONLY the value, nothing else.`;
-          console.log(`[FieldMapper] AI (fallback) | selector: ${mapping.field.selector} | label: "${fieldLabel}"`);
-          answer = await generateText(resumeSystemPrompt, finalPrompt, maxTokens);
-          console.log(`[FieldMapper] AI response for "${fieldLabel}": "${answer?.trim()}"`);
-        }
-
-        if (answer?.trim()) {
-          if (hasOptions) {
-            const matched = this.fuzzyMatchOption(answer.trim(), validOptions);
-            if (matched) mapping.mappedData = matched;
-          } else {
-            mapping.mappedData = answer.trim();
-          }
-        }
-      } catch {
-        void label;
+      if (validOptions.length > 0) {
+        const matched = this.fuzzyMatchOption(answer.trim(), validOptions);
+        if (matched) aiMappings[i].mappedData = matched;
+      } else {
+        aiMappings[i].mappedData = answer.trim();
       }
     }
 
@@ -495,8 +504,15 @@ ${resumeText}`;
       workAuthorization: profile?.work_authorization || '',
     };
 
-    const structuredResume: any = {
-      profileDetails: {},
+    const structuredResume: StructuredResume = {
+      profileDetails: {
+        name: profile?.full_name || '',
+        email: profile?.email || '',
+        phone: profile?.phone || '',
+        location: profile?.location || '',
+        linkedin: profile?.linkedin || '',
+        github: profile?.github || '',
+      },
       experience: Array.isArray(profile?.experience) ? profile.experience : [],
       education: Array.isArray(profile?.education) ? profile.education : [],
       skills: Array.isArray(profile?.skills) ? profile.skills : [],
@@ -505,8 +521,8 @@ ${resumeText}`;
     const coverLetterGenerator = new CoverLetterGenerator();
     let coverLetter = '';
 
+    let jobDescription: { title: string; company: string; description: string; url: string; location?: string } | undefined;
     try {
-      let jobDescription;
       if (jobText && jobText.trim().length > 100) {
         jobDescription = { title: '', company: '', description: jobText, url: jobUrl };
       } else {
@@ -517,13 +533,34 @@ ${resumeText}`;
           await jobCrawler.close();
         }
       }
-      coverLetter = await coverLetterGenerator.generateCoverLetter(jobDescription, userProfile, resumeText);
     } catch {
-      // Cover letter generation failure is non-fatal — proceed without it
+      // non-fatal
+    }
+
+    let jdSummary = '';
+    try {
+      const jdText = jobDescription?.description || jobText || '';
+      if (jdText.trim().length > 50) {
+        jdSummary = await extractJDRequirements(jdText);
+      }
+    } catch {
+      // jdSummary stays ''
+    }
+
+    try {
+      coverLetter = await coverLetterGenerator.generateCoverLetter(
+        jobDescription || { title: '', company: '', description: '', url: jobUrl },
+        userProfile,
+        resumeText,
+        jdSummary,
+        structuredResume
+      );
+    } catch {
+      // non-fatal
     }
 
     const mappings = this.mapFieldsToData(fields, userProfile, coverLetter, resumeText, structuredResume);
-    const resolved = await this.generateAnswersForAIFields(mappings, resumeText);
+    const resolved = await this.generateAnswersForAIFields(mappings, resumeText, structuredResume, jdSummary);
 
     const result: MappedField[] = resolved.map((m) => ({
       selector: m.field.selector,
