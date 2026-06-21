@@ -158,6 +158,13 @@ async function _generateFieldBatch(
   structuredResume: StructuredResume,
   jdSummary: string
 ): Promise<Record<string, string>> {
+  if (config.provider === 'openai' && !config.openai.apiKey) {
+    throw new Error('OPENAI_API_KEY not set');
+  }
+  if (config.provider === 'groq' && !config.groq.apiKey) {
+    throw new Error('GROQ_API_KEY not set');
+  }
+
   const name = structuredResume.profileDetails?.name || 'the candidate';
 
   const systemPrompt = `You are filling a job application for ${name}.
