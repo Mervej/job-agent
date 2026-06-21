@@ -1,5 +1,6 @@
 import { generateText } from './ai.service';
 import { JobDescription } from './job-crawler';
+import { StructuredResume } from './resume';
 import PDFDocument = require('pdfkit');
 import fs from 'fs';
 
@@ -19,7 +20,7 @@ export interface UserProfile {
   currentCTC?: string;
   noticePeriod?: string;
   workAuthorization?: string;
-  willingToRelocate?: string; // 'Yes' | 'No' — defaults to 'Yes' if not set
+  willingToRelocate?: string; // 'Yes' | 'No' - defaults to 'Yes' if not set
 }
 
 export class CoverLetterGenerator {
@@ -27,8 +28,8 @@ export class CoverLetterGenerator {
     jobDescription: JobDescription,
     userProfile: UserProfile,
     resumeText: string,
-    _jdSummary?: string,
-    _structuredResume?: unknown
+    jdSummary = '',
+    structuredResume?: StructuredResume
   ): Promise<string> {
     //
     // SYSTEM PROMPT (goes to {{ .System }} in your Modelfile)
@@ -40,29 +41,47 @@ Your responsibilities:
 - Write a compelling, authentic, human-sounding cover letter.
 - Make it personalized to the role and company.
 - Keep it professional, warm, and confident.
-- Avoid clichés, generic phrases, and AI-like wording.
+- Avoid cliches, generic phrases, and AI-like wording.
 - Never mention that you are generating text or referencing prompts.
 
 Structure the output:
-- 3–4 natural paragraphs
+- 3-4 natural paragraphs
 - Opening: why the candidate is a strong fit
 - Middle: relevant experience, skills, achievements tied to job requirements
 - Ending: enthusiasm + call to continue the conversation
 
-Do NOT include explanations — output only the final cover letter.
+Do NOT include explanations -- output only the final cover letter.
     `.trim();
 
     //
     // USER PROMPT (goes to {{ .Prompt }} in your Modelfile)
     //
-    const userPrompt = this.buildUserPrompt(jobDescription, userProfile, resumeText);
+    const userPrompt = this.buildUserPrompt(jobDescription, userProfile, resumeText, jdSummary, structuredResume);
 
     console.log('[CoverLetter] prompt >>>\n' + userPrompt + '\n<<<');
     const result = await generateText(systemPrompt, userPrompt);
     return result;
   }
 
-  private buildUserPrompt(job: JobDescription, user: UserProfile, resumeText: string): string {
+  private buildUserPrompt(
+    job: JobDescription,
+    user: UserProfile,
+    resumeText: string,
+    jdSummary: string,
+    structuredResume?: StructuredResume
+  ): string {
+    const experienceBlock = structuredResume?.experience?.length
+      ? structuredResume.experience
+          .map(e => `- ${e.role} at ${e.company} (${e.startDate} - ${e.endDate || 'Present'}): ${e.description || ''}`)
+          .join('\n')
+      : user.experience || 'See resume';
+
+    const educationBlock = structuredResume?.education?.length
+      ? structuredResume.education
+          .map(e => `- ${e.degree}${e.fieldOfStudy ? ` in ${e.fieldOfStudy}` : ''}, ${e.institution} (${e.startDate}-${e.endDate})`)
+          .join('\n')
+      : '';
+
     return `
 Write a tailored cover letter based on the following structured data.
 
@@ -72,27 +91,31 @@ Write a tailored cover letter based on the following structured data.
 - Location: ${job.location || 'Not specified'}
 - URL: ${job.url}
 
+### KEY REQUIREMENTS
+${jdSummary || 'See job description below'}
+
 ### JOB DESCRIPTION
 ${job.description || 'Not provided'}
-
-### KEY REQUIREMENTS
-Not specified
 
 ### CANDIDATE PROFILE
 - Name: ${user.name}
 - Email: ${user.email}
-- Experience summary: ${user.experience}
-- Skills: ${user.skills.join(', ')}
-- Key achievements: ${user.achievements.join(', ')}
 ${user.linkedin ? `- LinkedIn: ${user.linkedin}` : ''}
 ${user.github ? `- GitHub: ${user.github}` : ''}
 ${user.location ? `- Location: ${user.location}` : ''}
+
+### CANDIDATE EXPERIENCE
+${experienceBlock}
+${educationBlock ? `\n### EDUCATION\n${educationBlock}` : ''}
+
+### SKILLS
+${user.skills.join(', ')}
 
 ### RESUME
 ${resumeText}
 
 ### GUIDANCE
-Generate a polished, personal, job-specific cover letter that clearly connects the candidate’s background to the requirements. Use warm professional language, first-person perspective, and avoid clichés.
+Generate a polished, personal, job-specific cover letter that clearly connects the candidate's background to the KEY REQUIREMENTS above. Use warm professional language, first-person perspective, and avoid cliches.
     `.trim();
   }
 
