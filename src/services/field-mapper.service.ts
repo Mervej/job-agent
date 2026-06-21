@@ -432,7 +432,7 @@ export class FieldMapperService {
 
   private async generateAnswersForAIFields(
     mappings: FieldMapping[],
-    resumeText: string,
+    _resumeText: string,
     structuredResume: StructuredResume,
     jdSummary: string
   ): Promise<FieldMapping[]> {
@@ -445,7 +445,12 @@ export class FieldMapperService {
       formatHint: buildFormatHint(m.field),
     }));
 
-    const answers = await generateStructuredFields(fieldSpecs, structuredResume, jdSummary);
+    let answers: Record<string, string> = {};
+    try {
+      answers = await generateStructuredFields(fieldSpecs, structuredResume, jdSummary);
+    } catch {
+      return mappings;
+    }
 
     for (let i = 0; i < aiMappings.length; i++) {
       const answer = answers[`f${i}`];
