@@ -42,6 +42,30 @@ const ATS_PATTERNS = [
   /.*\.freshteam\.com\/jobs\/.+\/apply/,
   /.*\.freshteam\.com\/jobs\//,
 
+  // Rippling ATS
+  /ats\.rippling\.com\/.+\/jobs/,
+
+  // Recruitee
+  /\.recruitee\.com\/o\//,
+
+  // Personio
+  /\.jobs\.personio\.(com|de)\//,
+
+  // Taleo (Oracle)
+  /\.taleo\.net\/careersection\/.+\/jobapply\.ftl/,
+
+  // Darwinbox
+  /\.darwinbox\.in\/ms\/candidatev2\//,
+
+  // Instahyre
+  /instahyre\.com\/job\//,
+
+  // Cutshort
+  /cutshort\.io\/.+\/jobs\//,
+
+  // Naukri
+  /naukri\.com\/job-listings-/,
+
   // Generic apply page detection (fallback — checked last)
   /[?&/]apply($|[/?&#])/,
   /[?&/]application($|[/?&#])/,
@@ -61,6 +85,26 @@ const JD_PAGE_PATTERNS = [
   { pattern: /linkedin\.com\/jobs\/(view|collections)\//, exclude: null },
   // Indeed job description pages
   { pattern: /indeed\.com\/viewjob/, exclude: null },
+  // Freshteam: job listing page (without /apply suffix)
+  { pattern: /.*\.freshteam\.com\/jobs\/[^/]+\/[^/]+$/, exclude: /\/apply/ },
+  // Recruitee: job listing page (without /c/new apply suffix)
+  { pattern: /\.recruitee\.com\/o\/[^/?]+$/, exclude: /\/c\/new/ },
+  // Personio: job listing page (without /apply suffix)
+  { pattern: /\.jobs\.personio\.(com|de)\/job\/\d+$/, exclude: /\/apply/ },
+  // Taleo: job detail page (before the jobapply step)
+  { pattern: /\.taleo\.net\/careersection\/.+\/jobdetail\.ftl/, exclude: null },
+  // Naukri: individual job listing page
+  { pattern: /naukri\.com\/job-listings-/, exclude: null },
+  // Wellfound: individual job page on company profile
+  { pattern: /wellfound\.com\/company\/[^/]+\/jobs\/[^/]+$/, exclude: null },
+  // ZipRecruiter: individual job page
+  { pattern: /ziprecruiter\.com\/c\/[^/]+\/Job\//, exclude: null },
+  // Rippling: job detail page (form lives at .../jobs/{id}/apply)
+  { pattern: /ats\.rippling\.com\/[^/]+\/jobs\/[^/?]+/, exclude: /\/apply/ },
+  // Instahyre / Cutshort / Darwinbox listing pages
+  { pattern: /instahyre\.com\/job\//, exclude: null },
+  { pattern: /cutshort\.io\/.+\/jobs\//, exclude: null },
+  { pattern: /\.darwinbox\.in\/ms\/candidatev2\//, exclude: /\/apply/ },
   // Generic job boards — has no /apply or /application in path
   { pattern: /greenhouse\.io\/jobs\/\d+$/, exclude: null },
 ];
@@ -83,4 +127,32 @@ function isJobDescriptionPage(url) {
   return JD_PAGE_PATTERNS.some(({ pattern, exclude }) =>
     pattern.test(url) && (!exclude || !exclude.test(url))
   );
+}
+
+/**
+ * True when extracted fields look like a real application form (not a JD page).
+ * @param {Array<{inputType?: string, label?: string, fieldName?: string, placeholder?: string}>} fields
+ * @returns {boolean}
+ */
+function hasSubstantialApplicationSignals(fields) {
+  return (fields || []).some((f) => {
+    const info = `${f.label || ''} ${f.fieldName || ''} ${f.placeholder || ''} ${f.inputType || ''}`.toLowerCase();
+    if (f.inputType === 'email' || f.inputType === 'file' || f.inputType === 'tel') return true;
+    return /email|resume|curriculum|phone|first.?name|last.?name|cover.?letter|linkedin/.test(info);
+  });
+}
+
+/**
+ * General fast-path: any page with an Apply CTA and no real application form yet
+ * should capture the JD and navigate — not wait 12s for fields that will never appear.
+ * @param {number} fieldCount
+ * @param {boolean} hasApplyButton
+ * @param {boolean} hasSubstantialApplicationSignals
+ * @returns {boolean}
+ */
+function shouldNavigateViaApplyButton(fieldCount, hasApplyButton, hasSubstantialApplicationSignals) {
+  if (!hasApplyButton) return false;
+  if (hasSubstantialApplicationSignals) return false;
+  if (fieldCount > 2) return false;
+  return true;
 }

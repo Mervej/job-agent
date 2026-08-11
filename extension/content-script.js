@@ -180,24 +180,35 @@ async function handleNoFieldsPage() {
            src.includes('greenhouse.io') ||
            src.includes('lever.co') ||
            src.includes('myworkdayjobs.com') ||
-           src.includes('smartrecruiters.com');
+           src.includes('smartrecruiters.com') ||
+           src.includes('rippling.com');
   });
   if (atsFrame?.src) {
     postToPanel({ type: 'STATUS', text: 'Opening application form…', showSpinner: true });
     await saveJdAndNavigate(() => setTimeout(() => { window.location.href = atsFrame.src; }, 600));
-    return;
+    return true;
   }
 
-  // Try to find an Apply button and navigate to the actual form
+  // Rippling JD pages: form is always at .../jobs/{id}/apply — navigate directly
+  const rippling = window.location.href.match(/^(https:\/\/ats\.rippling\.com\/[^/]+\/jobs\/[^/?#]+)/i);
+  if (rippling && !/\/apply\/?($|[?#])/i.test(window.location.pathname)) {
+    const applyUrl = `${rippling[1]}/apply${window.location.search || ''}`;
+    postToPanel({ type: 'STATUS', text: 'JD captured — opening application form…', showSpinner: true });
+    await saveJdAndNavigate(() => setTimeout(() => { window.location.href = applyUrl; }, 400));
+    return true;
+  }
+
+  // Try to find an Apply button and navigate to the actual form (any ATS)
   const applyBtn = findApplyButton();
   if (applyBtn) {
     postToPanel({ type: 'STATUS', text: 'JD captured — navigating to application form…', showSpinner: true });
     await saveJdAndNavigate(() => { applyBtn.click(); });
-    return;
+    return true;
   }
 
   postToPanel({ type: 'STATUS', text: 'No form fields found on this page.', showSpinner: false });
   isFilling = false;
+  return false;
 }
 
 async function saveJdAndNavigate(navigateFn) {
@@ -211,17 +222,148 @@ async function saveJdAndNavigate(navigateFn) {
   navigateFn();
 }
 
+/**
+ * Upload resume or cover-letter PDF into a file input field.
+ * Returns { label, value } for the panel status line.
+ * If cover-letter upload fails, auto-downloads `{username}-{company}.pdf` as backup.
+ */
+async function uploadFileField(fileField, coverLetter, allFields = [], fileIndex = 0, fileFields = []) {
+  const role = classifyFileFieldRole(fileField, fileIndex, fileFields);
+  const displayLabel = role === 'coverLetter'
+    ? (fileField.label && !/^drop\b/i.test(fileField.label) ? fileField.label : 'Cover Letter')
+    : (fileField.label && !/^drop\b/i.test(fileField.label) ? fileField.label : 'Resume');
+  const selector = fileField.selector;
+
+  if (role === 'coverLetter') {
+    const hasTextCoverLetterField = (allFields || []).some(f =>
+      f.inputType !== 'file' &&
+      `${f.label || ''} ${f.fieldName || ''}`.toLowerCase().includes('cover')
+    );
+    if (hasTextCoverLetterField) {
+      return { label: displayLabel, value: '— skipped (text filled)' };
+    }
+    if (coverLetter && coverLetter.trim().length > 50) {
+      const clResp = await sendToBackground({
+        type: 'FETCH_COVER_LETTER_PDF',
+        text: coverLetter,
+        companyName: _jobCompany,
+        profileName: _profileName,
+      });
+      if (clResp.ok) {
+        const ok = await fillField(selector, `${clResp.base64},${clResp.filename}`, 'input', 'file', false);
+        if (ok) {
+          return { label: displayLabel, value: '✓ uploaded PDF' };
+        }
+        // Upload failed — download so the user can attach manually
+        downloadPdfBase64(clResp.base64, clResp.filename);
+        return {
+          label: displayLabel,
+          value: `✗ upload failed — downloaded ${clResp.filename}`,
+        };
+      }
+      return { label: displayLabel, value: `✗ PDF generation failed${clResp.error ? ': ' + clResp.error : ''}` };
+    }
+    return { label: displayLabel, value: '— no cover letter generated' };
+  }
+
+  const fileResp = await sendToBackground({ type: 'FETCH_RESUME_FILE', resumeId: activeResumeId, profileName: _profileName });
+  if (!fileResp.ok) {
+    return { label: displayLabel, value: `✗ fetch failed: ${fileResp.error || 'unknown'}` };
+  }
+  const ok = await fillField(selector, `${fileResp.base64},${fileResp.filename}`, 'input', 'file', false);
+  return { label: displayLabel, value: ok ? '✓ uploaded' : '✗ upload failed (check extension service worker logs)' };
+}
+
+/**
+ * Decide resume vs cover-letter for a file input.
+ * Rippling labels both as "Drop or select…" — use nearby title text, then DOM order.
+ */
+function classifyFileFieldRole(fileField, fileIndex, fileFields) {
+  const info = `${fileField.label || ''} ${fileField.fieldName || ''} ${fileField.placeholder || ''} ${fileField.questionText || ''} ${fileField.sectionHeading || ''}`.toLowerCase();
+  if (/cover|motivation/.test(info)) return 'coverLetter';
+  if (/\b(resume|cv|curriculum|r[eé]sum)/.test(info) && !/cover/.test(info)) return 'resume';
+
+  // Live DOM: look for Resume / Cover letter near the stamped input
+  try {
+    const el = document.querySelector(fileField.selector);
+    if (el) {
+      const title = (typeof getFileFieldTitle === 'function' ? getFileFieldTitle(el) : '').toLowerCase();
+      if (/cover|motivation/.test(title)) return 'coverLetter';
+      if (/\b(resume|cv|curriculum|r[eé]sum)/.test(title)) return 'resume';
+
+      let node = el.parentElement;
+      for (let i = 0; node && i < 6; i++, node = node.parentElement) {
+        const text = (node.innerText || '').toLowerCase();
+        // Prefer the nearest card that mentions only one of the two
+        const hasCover = /cover\s*letter|motivation/.test(text);
+        const hasResume = /\b(resume|cv|r[eé]sum[eé])\b/.test(text);
+        if (hasCover && !hasResume) return 'coverLetter';
+        if (hasResume && !hasCover) return 'resume';
+      }
+    }
+  } catch { /* ignore */ }
+
+  // Rippling basicQuestions order: resume then cover_letter
+  if ((fileFields || []).length >= 2) {
+    return fileIndex === 0 ? 'resume' : 'coverLetter';
+  }
+  return 'resume';
+}
+
+/** Trigger a browser download of a PDF from base64 (backup when ATS upload fails). */
+function downloadPdfBase64(base64, filename) {
+  try {
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    const blob = new Blob([bytes], { type: 'application/pdf' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename || 'cover-letter.pdf';
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      URL.revokeObjectURL(url);
+      a.remove();
+    }, 1000);
+  } catch (err) {
+    console.warn('[Job Agent] cover letter download failed', err);
+  }
+}
+
 async function runFillCycle() {
   if (isFilling) return;
   isFilling = true;
 
   try {
-    // Fast-path: known JD pages will never have form fields — skip the 12-second wait
-    if (isJobDescriptionPage(window.location.href)) {
+    // Fast-path: known JD URLs OR any page with an Apply CTA and no real application form yet.
+    // Skips the 12s form wait so we capture the JD and navigate immediately.
+    const earlyFields = extractFields(document);
+    const earlyApplyBtn = findApplyButton();
+    const looksLikeJdPage =
+      isJobDescriptionPage(window.location.href) ||
+      shouldNavigateViaApplyButton(
+        earlyFields.length,
+        !!earlyApplyBtn,
+        hasSubstantialApplicationSignals(earlyFields)
+      );
+
+    if (looksLikeJdPage) {
       postToPanel({ type: 'STATUS', text: 'Job description page — looking for Apply button…', showSpinner: true });
       await sleep(800); // brief wait for SPA to settle
-      await handleNoFieldsPage();
-      return;
+      const settled = extractFields(document);
+      // If a real form hydrated while we waited, fall through to normal fill
+      if (
+        settled.length > 2 ||
+        hasSubstantialApplicationSignals(settled)
+      ) {
+        // continue below
+      } else {
+        await handleNoFieldsPage();
+        return;
+      }
     }
 
     postToPanel({ type: 'STATUS', text: 'Waiting for form to load...', showSpinner: true });
@@ -253,18 +395,52 @@ async function runFillCycle() {
     // JD has been used — clear it so it doesn't bleed into subsequent pages
     if (storedJD) await sendToBackground({ type: 'CLEAR_JD' });
 
-    // Store profile name for resume filename; update company from stored JD if richer
-    if (resp.profileName) _profileName = resp.profileName;
+    // Store profile name for resume/cover-letter filenames; update company from stored JD if richer
+    _profileName =
+      resp.profileName ||
+      resp.structuredResume?.profileDetails?.name ||
+      _profileName ||
+      '';
     if (storedJD?.company) _jobCompany = storedJD.company;
+    // Prefer company from JD detect if still empty
+    if (!_jobCompany) {
+      const { jobCompany } = detectJobInfo();
+      if (jobCompany) _jobCompany = jobCompany;
+    }
 
     const { mappings, coverLetter } = resp;
     const flagged = [];
     let filled = 0;
     const answeredQuestions = new Set();
+    const totalEstimate = mappings.length;
+
+    // Always handle file inputs from the extracted field list — do not depend on AI
+    // mappings (required resume fields can be promoted to AI and lose the file path).
+    const fileFields = fields.filter((f) => f.inputType === 'file');
+    const handledFileSelectors = new Set();
+    for (let i = 0; i < fileFields.length; i++) {
+      const fileField = fileFields[i];
+      const result = await uploadFileField(fileField, coverLetter, fields, i, fileFields);
+      handledFileSelectors.add(fileField.selector);
+      postToPanel({
+        type: 'FIELD_FILLED',
+        selector: fileField.selector,
+        label: result.label,
+        value: result.value,
+        filled: ++filled,
+        total: Math.max(totalEstimate, fileFields.length),
+      });
+      await sleep(FILL_DELAY_MS);
+    }
 
     for (const mapping of mappings) {
       const { selector, value, confidence } = mapping;
       const fieldMeta = fields.find((f) => f.selector === selector) || {};
+
+      // Already uploaded above
+      if (fieldMeta.inputType === 'file' || handledFileSelectors.has(selector)) {
+        continue;
+      }
 
       // Deduplicate fills driven by the same questionText — prevents one ATS question
       // (e.g. Lever's card-level custom question) from being filled into every field
@@ -275,71 +451,6 @@ async function runFillCycle() {
         continue;
       }
       if (qt) answeredQuestions.add(qt);
-
-      // Auto-fill file inputs — resume/CV gets the PDF; cover letter file fields are skipped
-      if (fieldMeta.inputType === 'file') {
-        const fieldInfo = `${fieldMeta.label || ''} ${fieldMeta.fieldName || ''} ${fieldMeta.placeholder || ''}`.toLowerCase();
-        const isCoverLetter = fieldInfo.includes('cover') || fieldInfo.includes('motivation');
-
-        if (isCoverLetter) {
-          // Only upload a PDF if there's no text/textarea cover letter field on this page
-          const hasTextCoverLetterField = fields.some(f =>
-            f.inputType !== 'file' &&
-            `${f.label || ''} ${f.fieldName || ''}`.toLowerCase().includes('cover')
-          );
-
-          if (hasTextCoverLetterField) {
-            postToPanel({
-              type: 'FIELD_FILLED',
-              selector,
-              label: fieldMeta.label || 'Cover Letter (file)',
-              value: '— skipped (text filled)',
-              filled: ++filled,
-              total: mappings.length,
-            });
-            await sleep(FILL_DELAY_MS);
-            continue;
-          }
-
-          // No text field — generate and upload a cover letter PDF if we have the text
-          let clValue = '— no cover letter generated';
-          if (coverLetter && coverLetter.trim().length > 50) {
-            const clResp = await sendToBackground({ type: 'FETCH_COVER_LETTER_PDF', text: coverLetter, companyName: _jobCompany });
-            if (clResp.ok) {
-              const ok = await fillField(selector, `${clResp.base64},${clResp.filename}`, 'input', 'file', false);
-              clValue = ok ? '✓ uploaded PDF' : '✗ upload failed';
-            } else {
-              clValue = '✗ PDF generation failed';
-            }
-          }
-          postToPanel({
-            type: 'FIELD_FILLED',
-            selector,
-            label: fieldMeta.label || 'Cover Letter',
-            value: clValue,
-            filled: ++filled,
-            total: mappings.length,
-          });
-          await sleep(FILL_DELAY_MS);
-          continue;
-        }
-
-        // Resume / CV — fetch PDF from backend via background service worker
-        const fileResp = await sendToBackground({ type: 'FETCH_RESUME_FILE', resumeId: activeResumeId, profileName: _profileName });
-        const ok = fileResp.ok
-          ? await fillField(selector, `${fileResp.base64},${fileResp.filename}`, 'input', 'file', false)
-          : false;
-        postToPanel({
-          type: 'FIELD_FILLED',
-          selector,
-          label: fieldMeta.label || 'Resume',
-          value: ok ? '✓ uploaded' : '✗ failed',
-          filled: ++filled,
-          total: mappings.length,
-        });
-        await sleep(FILL_DELAY_MS);
-        continue;
-      }
 
       if (!value) continue;
 

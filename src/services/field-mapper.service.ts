@@ -4,6 +4,19 @@ import { CoverLetterGenerator, UserProfile } from './cover-letter-generator';
 import { supabase } from './supabase';
 import { StructuredResume } from './resume';
 
+/** Best-effort name from the first lines of raw resume text when profile.full_name is empty. */
+function extractNameFromResumeText(resumeText: string): string {
+  if (!resumeText?.trim()) return '';
+  for (const raw of resumeText.split('\n').map((l) => l.trim()).filter(Boolean).slice(0, 8)) {
+    if (raw.length < 3 || raw.length > 60) continue;
+    if (raw.includes('@') || /https?:/i.test(raw) || /\d{3,}/.test(raw)) continue;
+    if (/^(resume|curriculum|profile|summary|experience|education|skills)\b/i.test(raw)) continue;
+    // Prefer 2–4 capitalized words (e.g. "Mervej Raj")
+    if (/^[A-Z][a-zA-Z'’-]+(?:\s+[A-Z][a-zA-Z'’-]+){1,3}$/.test(raw)) return raw;
+  }
+  return '';
+}
+
 // ─── Public types ─────────────────────────────────────────────────────────────
 
 export interface ExtensionField {
@@ -221,8 +234,12 @@ export class FieldMapperService {
     if (info.includes('twitter') || info.includes('x.com')) return 'twitter';
     if (info.includes('portfolio') || info.includes('website')) return 'portfolio';
     if (info.includes('location') || info.includes('city') || info.includes('country')) return 'location';
-    if (info.includes('resume') || info.includes('cv')) return 'resume';
-    if (info.includes('cover letter') || info.includes('motivation letter')) return 'coverLetter';
+    if (info.includes('resume') || info.includes('cv') || info.includes('résumé') || info.includes('resumé')) return 'resume';
+    if (info.includes('cover letter') || info.includes('motivation letter') || info.includes('cover_letter') || info.includes('coverletter')) return 'coverLetter';
+
+    // File inputs with no useful label still count as resume if the DOM type is file
+    // and we haven't matched cover letter above — avoid sending them to AI.
+    if (field.inputType === 'file') return 'resume';
 
     const sectionHeading = (field.sectionHeading || '').toLowerCase();
     const isJobSpecificSection =
@@ -366,7 +383,11 @@ export class FieldMapperService {
         case 'ifYesFollowUp':     mappedData = ''; break;
         case 'diversity':         mappedData = ''; break;
         case 'resume':            mappedData = undefined; needsAI = false; break;
-        case 'coverLetter':       mappedData = coverLetter; break;
+        case 'coverLetter':
+          // Text inputs get the PDF via the extension; only text/textarea use the letter body
+          mappedData = field.inputType === 'file' ? undefined : coverLetter;
+          needsAI = false;
+          break;
       }
 
       // ── Tier 2: AI for everything else ────────────────────────────────────────
@@ -376,8 +397,16 @@ export class FieldMapperService {
         aiPrompt = buildAiFieldPrompt(question);
       }
 
-      // Promote empty required Tier-1 answers to AI batch
-      if (DIRECT_TYPES.has(semanticType) && !needsAI && (mappedData === '' || mappedData === undefined) && field.required) {
+      // Promote empty required Tier-1 answers to AI batch — except file uploads (handled by extension)
+      if (
+        DIRECT_TYPES.has(semanticType) &&
+        !needsAI &&
+        (mappedData === '' || mappedData === undefined) &&
+        field.required &&
+        field.inputType !== 'file' &&
+        semanticType !== 'resume' &&
+        semanticType !== 'coverLetter'
+      ) {
         needsAI = true;
         aiPrompt = undefined;
       }
@@ -579,7 +608,12 @@ export class FieldMapperService {
       resumeDownloadUrl: `/resumes/${resumeId}/file`,
       structuredResume,
       resumeText,
-      profileName: profile?.full_name || '',
+      profileName:
+        profile?.full_name ||
+        structuredResume.profileDetails?.name ||
+        userProfile.name ||
+        extractNameFromResumeText(resumeText) ||
+        '',
     };
   }
 

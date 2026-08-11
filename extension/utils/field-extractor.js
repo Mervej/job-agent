@@ -11,7 +11,7 @@ function extractFields(doc = document) {
     'div[contenteditable="true"]',
     'select',
     'input[type="checkbox"]', 'input[type="radio"]',
-    'input[type="file"]',
+    'input[type="file"]', 'input[type="File"]',
   ].join(', ');
 
   const seen = new Set();
@@ -92,12 +92,20 @@ function makeSelector(el, index) {
   const type = el.type;
   const placeholder = el.placeholder;
   const aria = el.getAttribute('aria-label');
+  const testId = el.getAttribute('data-testid');
 
   // Radio buttons: always use name-based selector so the filler can scan the whole group.
   // id-based selectors only identify one option and break fillRadio's group lookup.
   if (type === 'radio' && name) return `${tag}[type="radio"][name="${name}"]`;
 
   if (id) return `${tag}[id="${id}"]`;
+  // Rippling FileDrop and similar widgets expose data-testid but no name/id on the <input>
+  if (testId) {
+    const safe = (typeof CSS !== 'undefined' && CSS.escape)
+      ? CSS.escape(testId)
+      : testId.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    return `${tag}[data-testid="${safe}"]`;
+  }
   // Only use [type] for <input> — textarea/select have a .type JS property but no type HTML attribute,
   // so textarea[type="textarea"] would match nothing in the DOM.
   // Also skip [type] when name contains brackets — CSS parsers miscount brackets in compound
@@ -106,28 +114,47 @@ function makeSelector(el, index) {
   if (name) return `${tag}[name="${name}"]`;
   if (aria) return `${tag}[aria-label="${aria}"]`;
   if (placeholder) return `${tag}[placeholder="${placeholder}"]`;
+
+  // File inputs often have no stable attributes (Rippling, etc.). Stamp a unique marker so
+  // fillField can reliably re-find the same element later.
+  if (type === 'file') {
+    const stamp = el.getAttribute('data-job-agent') || `file-${index}-${Date.now()}`;
+    el.setAttribute('data-job-agent', stamp);
+    return `input[type="file"][data-job-agent="${stamp}"]`;
+  }
+
   return `${tag}:nth-of-type(${index + 1})`;
 }
 
 function getLabel(el) {
+  // File uploads first: prefer "Resume" / "Cover letter" over dropzone helper text
+  if ((el.type || '').toLowerCase() === 'file') {
+    const fileTitle = getFileFieldTitle(el);
+    if (fileTitle) return fileTitle;
+  }
+
   const ariaLabel = el.getAttribute('aria-label');
-  if (ariaLabel?.trim()) return ariaLabel.trim();
+  if (ariaLabel?.trim() && !isDropzoneHelperText(ariaLabel)) return ariaLabel.trim();
 
   const ariaLabelledBy = el.getAttribute('aria-labelledby');
   if (ariaLabelledBy) {
     const text = ariaLabelledBy.split(/\s+/)
       .map(id => document.getElementById(id)?.textContent?.trim())
       .filter(Boolean).join(' ');
-    if (text) return text;
+    if (text && !isDropzoneHelperText(text)) return text;
   }
 
   if (el.id) {
     const forLabel = document.querySelector(`label[for="${el.id}"]`);
-    if (forLabel) return forLabel.textContent?.trim() || '';
+    const t = forLabel?.textContent?.trim() || '';
+    if (t && !isDropzoneHelperText(t)) return t;
   }
 
   const parentLabel = el.closest('label');
-  if (parentLabel) return parentLabel.textContent?.trim() || '';
+  if (parentLabel) {
+    const t = parentLabel.textContent?.trim() || '';
+    if (t && !isDropzoneHelperText(t) && t.length <= 80) return t;
+  }
 
   // Previous sibling label — checked before the broad .closest('div') to avoid picking up
   // labels from other sections. Covers Lever's <div class="application-label">, Ashby,
@@ -141,16 +168,57 @@ function getLabel(el) {
     if (['input', 'select', 'textarea', 'button'].includes(tag)) continue;
     if (prev.querySelector('input, textarea, select')) continue;
     const t = (prev.textContent || '').trim();
-    if (t && t.length <= 200) return t;
+    if (t && t.length <= 200 && !isDropzoneHelperText(t)) return t;
   }
 
   const group = el.closest('.form-group, .field, .form-row, .row');
   if (group) {
     const maybeLabel = group.querySelector('label');
-    if (maybeLabel) return maybeLabel.textContent?.trim() || '';
+    const t = maybeLabel?.textContent?.trim() || '';
+    if (t && !isDropzoneHelperText(t)) return t;
   }
 
-  return el.placeholder?.trim() || '';
+  const ph = el.placeholder?.trim() || '';
+  return isDropzoneHelperText(ph) ? '' : ph;
+}
+
+function isDropzoneHelperText(text) {
+  const t = (text || '').trim().toLowerCase();
+  if (!t) return true;
+  return (
+    /^drop\b/.test(t) ||
+    /\bselect\b.*\.(doc|pdf|docx)/i.test(t) ||
+    /\(\.doc/.test(t) ||
+    /drag\s*(and|&)\s*drop/.test(t) ||
+    /browse\s*(files?|to upload)/.test(t) ||
+    /click\s+to\s+upload/.test(t) ||
+    /not\s*uploaded/.test(t)
+  );
+}
+
+/** Find "Resume" / "Cover letter" / "Résumé" title near a file input. */
+function getFileFieldTitle(el) {
+  const start =
+    el.closest('[class*="file"], [class*="File"], [class*="upload"], [class*="Upload"], [class*="drop"], [role="group"], fieldset')
+    || el.parentElement?.parentElement
+    || el.parentElement;
+  if (!start) return '';
+
+  let node = start;
+  for (let depth = 0; node && depth < 6; depth++, node = node.parentElement) {
+    const lines = (node.innerText || node.textContent || '')
+      .split('\n')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const title = lines.find(
+      (t) =>
+        /^(resume|cv|curriculum\s*vitae|cover\s*letter|motivation\s*letter|r[eé]sum[eé])\b/i.test(t) &&
+        t.length < 40 &&
+        !isDropzoneHelperText(t)
+    );
+    if (title) return title;
+  }
+  return '';
 }
 
 function getQuestionText(el) {
