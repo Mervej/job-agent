@@ -31,7 +31,10 @@ app.use(cors({
   },
 }));
 
-app.use(express.json());
+// Default 100kb is too small: real ATS pages (e.g. Phenom-based career sites like
+// Marsh's) embed full <select> option lists (countries, phone codes, referral
+// sources) that field-extractor.js sends verbatim in the /apply/map-fields payload.
+app.use(express.json({ limit: '10mb' }));
 
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok' });

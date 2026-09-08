@@ -532,12 +532,8 @@ export class FieldMapperService {
     return mappings;
   }
 
-  async mapFields(
-    fields: ExtensionField[],
-    resumeId: string,
-    jobUrl: string,
-    jobText?: string
-  ): Promise<MapFieldsResult> {
+  /** Shared setup for anything that needs the candidate's profile + a generated cover letter. */
+  private async buildCoverLetterContext(resumeId: string, jobUrl: string, jobText?: string) {
     const { data: resume, error: resumeErr } = await supabase
       .from('resumes')
       .select('id, user_id, parsed_text')
@@ -625,6 +621,35 @@ export class FieldMapperService {
       // non-fatal
     }
 
+    const profileName =
+      profile?.full_name ||
+      structuredResume.profileDetails?.name ||
+      userProfile.name ||
+      extractNameFromResumeText(resumeText) ||
+      '';
+
+    return { userProfile, structuredResume, resumeText, coverLetter, jdSummary, profileName };
+  }
+
+  /** Standalone cover-letter generation for the extension's manual "Generate Cover Letter" button. */
+  async generateCoverLetterOnly(
+    resumeId: string,
+    jobUrl: string,
+    jobText?: string
+  ): Promise<{ coverLetter: string; profileName: string }> {
+    const { coverLetter, profileName } = await this.buildCoverLetterContext(resumeId, jobUrl, jobText);
+    return { coverLetter, profileName };
+  }
+
+  async mapFields(
+    fields: ExtensionField[],
+    resumeId: string,
+    jobUrl: string,
+    jobText?: string
+  ): Promise<MapFieldsResult> {
+    const { userProfile, structuredResume, resumeText, coverLetter, jdSummary, profileName } =
+      await this.buildCoverLetterContext(resumeId, jobUrl, jobText);
+
     const mappings = this.mapFieldsToData(fields, userProfile, coverLetter, resumeText, structuredResume);
     const resolved = await this.generateAnswersForAIFields(mappings, resumeText, structuredResume, jdSummary);
 
@@ -640,12 +665,7 @@ export class FieldMapperService {
       resumeDownloadUrl: `/resumes/${resumeId}/file`,
       structuredResume,
       resumeText,
-      profileName:
-        profile?.full_name ||
-        structuredResume.profileDetails?.name ||
-        userProfile.name ||
-        extractNameFromResumeText(resumeText) ||
-        '',
+      profileName,
     };
   }
 

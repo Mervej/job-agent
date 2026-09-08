@@ -23,6 +23,24 @@ router.post('/map-fields', async (req, res) => {
   }
 });
 
+// Standalone cover-letter generation for the extension's manual "Generate Cover Letter" button
+router.post('/generate-cover-letter', async (req, res) => {
+  const { resumeId, jobUrl, jobText } = req.body;
+
+  if (!resumeId) return res.status(400).json({ error: 'resumeId is required' });
+  if (!jobUrl) return res.status(400).json({ error: 'jobUrl is required' });
+
+  try {
+    const result = await fieldMapper.generateCoverLetterOnly(resumeId, jobUrl, jobText);
+    res.json(result);
+  } catch (error: any) {
+    if (error.message === 'Resume not found') {
+      return res.status(404).json({ error: error.message });
+    }
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Map fields for a single structured entry (experience/education/project)
 router.post('/map-entry-fields', (req, res) => {
   const { fields, entryType, entryData, resumeText, isCurrentJob } = req.body;

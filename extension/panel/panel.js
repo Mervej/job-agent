@@ -152,6 +152,11 @@ $('closeBtn').addEventListener('click', () => {
   window.parent.postMessage({ type: 'CLOSE' }, '*');
 });
 
+$('genCoverLetterBtn').addEventListener('click', () => {
+  $('genCoverLetterBtn').disabled = true;
+  window.parent.postMessage({ type: 'GENERATE_COVER_LETTER' }, '*');
+});
+
 // ─── Settings ─────────────────────────────────────────────────────────────────
 
 $('settingsBtn').addEventListener('click', () => {
@@ -218,6 +223,8 @@ function setStatus(text, showSpinner = true) {
   $('spinner').className = showSpinner ? 'spinner' : 'spinner hidden';
   // Show rescan button only when idle (no spinner)
   $('rescanBtn').style.display = showSpinner ? 'none' : '';
+  // Idle again — re-enable the cover-letter button in case it triggered this status
+  if (!showSpinner) $('genCoverLetterBtn').disabled = false;
 }
 
 function escapeHtml(str) {

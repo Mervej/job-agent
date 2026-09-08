@@ -526,6 +526,56 @@ function buildCoverLetterFilename(profileName, companyName) {
 }
 
 /**
+ * Manual "Generate Cover Letter" panel button — works on any step of a multi-page
+ * application (the JD persists in storage for the whole flow, not just the first page),
+ * so it's a fallback for ATS's that never expose a distinct cover-letter file field.
+ */
+async function handleGenerateCoverLetterRequest() {
+  if (!activeResumeId) {
+    postToPanel({ type: 'ERROR', message: 'Select a resume first.' });
+    return;
+  }
+
+  postToPanel({ type: 'STATUS', text: 'Generating cover letter...', showSpinner: true });
+
+  const { jd: storedJD } = await sendToBackground({ type: 'GET_JD' });
+  const jobUrl = storedJD?.url || window.location.href;
+  const jobText = storedJD?.text || extractJobDescriptionText();
+
+  const genResp = await sendToBackground({
+    type: 'GENERATE_COVER_LETTER',
+    payload: { resumeId: activeResumeId, jobUrl, jobText },
+  });
+  if (!genResp.ok || !genResp.coverLetter) {
+    postToPanel({ type: 'ERROR', message: genResp.error || 'Cover letter generation failed' });
+    return;
+  }
+
+  _profileName = genResp.profileName || _profileName || '';
+  if (storedJD?.company) _jobCompany = storedJD.company;
+  if (!_jobCompany) {
+    const { jobCompany } = detectJobInfo();
+    if (jobCompany) _jobCompany = jobCompany;
+  }
+
+  const filename = buildCoverLetterFilename(_profileName, _jobCompany);
+  const pdfResp = await sendToBackground({
+    type: 'FETCH_COVER_LETTER_PDF',
+    text: genResp.coverLetter,
+    companyName: _jobCompany,
+    profileName: _profileName,
+    filename,
+  });
+  if (!pdfResp.ok) {
+    postToPanel({ type: 'ERROR', message: pdfResp.error || 'PDF generation failed' });
+    return;
+  }
+
+  downloadPdfBase64(pdfResp.base64, pdfResp.filename || filename);
+  postToPanel({ type: 'STATUS', text: `✓ Downloaded ${pdfResp.filename || filename}`, showSpinner: false });
+}
+
+/**
  * Resolve display name from map-fields response without relying on DB alone.
  * Prefer profileName, then structured resume, then first+last mappings.
  */
@@ -556,17 +606,23 @@ function resolveCandidateName(resp, fields) {
  * Rippling labels both as "Drop or select…" — use nearby title text, then DOM order.
  */
 function classifyFileFieldRole(fileField, fileIndex, fileFields) {
+  const log = (branch, role) =>
+    console.log('[JobAgent] classifyFileFieldRole:', branch, '->', role,
+      '| selector:', fileField.selector,
+      '| label:', fileField.label, '| fieldName:', fileField.fieldName,
+      '| sectionHeading:', fileField.sectionHeading, '| fileIndex:', fileIndex);
+
   const info = `${fileField.label || ''} ${fileField.fieldName || ''} ${fileField.placeholder || ''} ${fileField.questionText || ''} ${fileField.sectionHeading || ''}`.toLowerCase();
-  if (/cover|motivation/.test(info)) return 'coverLetter';
-  if (/\b(resume|cv|curriculum|r[eé]sum)/.test(info) && !/cover/.test(info)) return 'resume';
+  if (/cover|motivation/.test(info)) { log('info-keyword', 'coverLetter'); return 'coverLetter'; }
+  if (/\b(resume|cv|curriculum|r[eé]sum)/.test(info) && !/cover/.test(info)) { log('info-keyword', 'resume'); return 'resume'; }
 
   // Live DOM: look for Resume / Cover letter near the stamped input
   try {
     const el = document.querySelector(fileField.selector);
     if (el) {
       const title = (typeof getFileFieldTitle === 'function' ? getFileFieldTitle(el) : '').toLowerCase();
-      if (/cover|motivation/.test(title)) return 'coverLetter';
-      if (/\b(resume|cv|curriculum|r[eé]sum)/.test(title)) return 'resume';
+      if (/cover|motivation/.test(title)) { log('dom-title', 'coverLetter'); return 'coverLetter'; }
+      if (/\b(resume|cv|curriculum|r[eé]sum)/.test(title)) { log('dom-title', 'resume'); return 'resume'; }
 
       let node = el.parentElement;
       for (let i = 0; node && i < 6; i++, node = node.parentElement) {
@@ -574,16 +630,21 @@ function classifyFileFieldRole(fileField, fileIndex, fileFields) {
         // Prefer the nearest card that mentions only one of the two
         const hasCover = /cover\s*letter|motivation/.test(text);
         const hasResume = /\b(resume|cv|r[eé]sum[eé])\b/.test(text);
-        if (hasCover && !hasResume) return 'coverLetter';
-        if (hasResume && !hasCover) return 'resume';
+        if (hasCover && !hasResume) { log(`dom-ancestor(depth=${i})`, 'coverLetter'); return 'coverLetter'; }
+        if (hasResume && !hasCover) { log(`dom-ancestor(depth=${i})`, 'resume'); return 'resume'; }
       }
+    } else {
+      console.log('[JobAgent] classifyFileFieldRole: selector did not resolve to a live element:', fileField.selector);
     }
-  } catch { /* ignore */ }
+  } catch (err) { console.warn('[JobAgent] classifyFileFieldRole: DOM lookup failed', err); }
 
   // Rippling basicQuestions order: resume then cover_letter
   if ((fileFields || []).length >= 2) {
-    return fileIndex === 0 ? 'resume' : 'coverLetter';
+    const role = fileIndex === 0 ? 'resume' : 'coverLetter';
+    log('index-fallback', role);
+    return role;
   }
+  log('single-field-fallback', 'resume');
   return 'resume';
 }
 
@@ -710,8 +771,9 @@ async function runFillCycle() {
       return;
     }
 
-    // JD has been used — clear it so it doesn't bleed into subsequent pages
-    if (storedJD) await sendToBackground({ type: 'CLEAR_JD' });
+    // Keep the JD in storage for the rest of this multi-step application (later steps
+    // re-run this same code path and need it too) — it's only overwritten, never cleared
+    // here, so it naturally resets when the user starts a different job's SAVE_JD flow.
 
     // Store profile name for resume/cover-letter filenames
     _profileName = resolveCandidateName(resp, fields) || _profileName || '';
@@ -1279,6 +1341,10 @@ async function onPanelMessage(event) {
 
   if (msg.type === 'CLOSE') {
     closePanel();
+  }
+
+  if (msg.type === 'GENERATE_COVER_LETTER') {
+    await handleGenerateCoverLetterRequest();
   }
 }
 

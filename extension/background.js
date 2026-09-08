@@ -51,6 +51,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   const handlers = {
     FETCH_RESUMES:       () => handleFetchResumes(sendResponse),
     MAP_FIELDS:          () => handleMapFields(message.payload, sendResponse),
+    GENERATE_COVER_LETTER: () => handleGenerateCoverLetter(message.payload, sendResponse),
     FETCH_RESUME_FILE:   () => handleFetchResumeFile(message.resumeId, message.profileName, sendResponse),
     FETCH_COVER_LETTER_PDF: () => handleFetchCoverLetterPdf(
       message.text,
@@ -83,9 +84,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     GET_JD: () => {
       chrome.storage.local.get('pendingJD', (d) => sendResponse({ jd: d.pendingJD ?? null }));
       return true;
-    },
-    CLEAR_JD: () => {
-      chrome.storage.local.remove('pendingJD', () => sendResponse({ ok: true }));
     },
   };
 
@@ -210,6 +208,25 @@ async function handleMapFields({ fields, resumeId, jobUrl, jobText }, sendRespon
       method: 'POST',
       headers: await authHeaders(),
       body: JSON.stringify({ fields, resumeId, jobUrl, ...(jobText ? { jobText } : {}) }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || `Backend returned ${res.status}`);
+    }
+    const data = await res.json();
+    sendResponse({ ok: true, ...data });
+  } catch (err) {
+    sendResponse({ ok: false, error: err.message });
+  }
+}
+
+async function handleGenerateCoverLetter({ resumeId, jobUrl, jobText }, sendResponse) {
+  try {
+    const url = await backendReady;
+    const res = await fetch(`${url}/apply/generate-cover-letter`, {
+      method: 'POST',
+      headers: await authHeaders(),
+      body: JSON.stringify({ resumeId, jobUrl, ...(jobText ? { jobText } : {}) }),
     });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
