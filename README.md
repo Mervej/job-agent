@@ -155,7 +155,7 @@ npx jest   # 21 passing across 3 suites
 
 ```env
 AI_PROVIDER=ollama|groq|openai   # ollama = fully local & free; groq = free cloud tier
-AI_MODEL=qwen2.5:7b              # or llama-3.3-70b-versatile (groq) / gpt-4o-mini (openai)
+AI_MODEL=qwen2.5:7b              # or openai/gpt-oss-120b (groq) / gpt-4o-mini (openai)
 OLLAMA_URL=http://localhost:11434
 GROQ_API_KEY=gsk_...            # only if AI_PROVIDER=groq
 OPENAI_API_KEY=sk_...           # only if AI_PROVIDER=openai

@@ -22,7 +22,7 @@ services:
       - key: AI_PROVIDER
         value: groq
       - key: AI_MODEL
-        value: llama-3.3-70b-versatile
+        value: openai/gpt-oss-120b
       - key: USE_STAGEHAND
         value: "false"
       - key: SUPABASE_URL

@@ -16,7 +16,7 @@ export default {
   },
   groq: {
     apiKey: process.env.GROQ_API_KEY || '',
-    model: process.env.AI_MODEL || 'llama-3.3-70b-versatile',
+    model: process.env.AI_MODEL || 'openai/gpt-oss-120b',
   },
   ollama: {
     url: process.env.OLLAMA_URL || 'http://localhost:11434',
