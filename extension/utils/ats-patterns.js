@@ -63,9 +63,6 @@ const ATS_PATTERNS = [
   // Cutshort
   /cutshort\.io\/.+\/jobs\//,
 
-  // Naukri
-  /naukri\.com\/job-listings-/,
-
   // Generic apply page detection (fallback — checked last)
   /[?&/]apply($|[/?&#])/,
   /[?&/]application($|[/?&#])/,
@@ -93,8 +90,6 @@ const JD_PAGE_PATTERNS = [
   { pattern: /\.jobs\.personio\.(com|de)\/job\/\d+$/, exclude: /\/apply/ },
   // Taleo: job detail page (before the jobapply step)
   { pattern: /\.taleo\.net\/careersection\/.+\/jobdetail\.ftl/, exclude: null },
-  // Naukri: individual job listing page
-  { pattern: /naukri\.com\/job-listings-/, exclude: null },
   // Wellfound: individual job page on company profile
   { pattern: /wellfound\.com\/company\/[^/]+\/jobs\/[^/]+$/, exclude: null },
   // ZipRecruiter: individual job page

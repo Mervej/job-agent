@@ -541,10 +541,13 @@ async function handleGenerateCoverLetterRequest() {
   const { jd: storedJD } = await sendToBackground({ type: 'GET_JD' });
   const jobUrl = storedJD?.url || window.location.href;
   const jobText = storedJD?.text || extractJobDescriptionText();
+  const detected = detectJobInfo();
+  const jobTitle = storedJD?.title || detected.jobTitle || '';
+  const company = storedJD?.company || _jobCompany || detected.jobCompany || '';
 
   const genResp = await sendToBackground({
     type: 'GENERATE_COVER_LETTER',
-    payload: { resumeId: activeResumeId, jobUrl, jobText },
+    payload: { resumeId: activeResumeId, jobUrl, jobText, jobTitle, company },
   });
   if (!genResp.ok || !genResp.coverLetter) {
     postToPanel({ type: 'ERROR', message: genResp.error || 'Cover letter generation failed' });
@@ -552,11 +555,7 @@ async function handleGenerateCoverLetterRequest() {
   }
 
   _profileName = genResp.profileName || _profileName || '';
-  if (storedJD?.company) _jobCompany = storedJD.company;
-  if (!_jobCompany) {
-    const { jobCompany } = detectJobInfo();
-    if (jobCompany) _jobCompany = jobCompany;
-  }
+  if (company) _jobCompany = company;
 
   const filename = buildCoverLetterFilename(_profileName, _jobCompany);
   const pdfResp = await sendToBackground({
@@ -755,6 +754,9 @@ async function runFillCycle() {
     const { jd: storedJD } = await sendToBackground({ type: 'GET_JD' });
     const jobUrl = storedJD?.url || window.location.href;
     const jobText = storedJD?.text || null;
+    const detected = detectJobInfo();
+    const jobTitle = storedJD?.title || detected.jobTitle || '';
+    const company = storedJD?.company || _jobCompany || detected.jobCompany || '';
 
     // Google Forms file-upload questions use a Drive picker that can't be automated —
     // keep them out of AI mapping entirely; they're flagged for manual completion below.
@@ -762,7 +764,7 @@ async function runFillCycle() {
 
     const resp = await sendToBackground({
       type: 'MAP_FIELDS',
-      payload: { fields: mappableFields, resumeId: activeResumeId, jobUrl, jobText },
+      payload: { fields: mappableFields, resumeId: activeResumeId, jobUrl, jobText, jobTitle, company },
     });
 
     if (!resp.ok) {
@@ -777,11 +779,7 @@ async function runFillCycle() {
 
     // Store profile name for resume/cover-letter filenames
     _profileName = resolveCandidateName(resp, fields) || _profileName || '';
-    if (storedJD?.company) _jobCompany = storedJD.company;
-    if (!_jobCompany) {
-      const { jobCompany } = detectJobInfo();
-      if (jobCompany) _jobCompany = jobCompany;
-    }
+    if (company) _jobCompany = company;
 
     const { mappings, coverLetter } = resp;
     const flagged = [];

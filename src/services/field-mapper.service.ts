@@ -533,7 +533,13 @@ export class FieldMapperService {
   }
 
   /** Shared setup for anything that needs the candidate's profile + a generated cover letter. */
-  private async buildCoverLetterContext(resumeId: string, jobUrl: string, jobText?: string) {
+  private async buildCoverLetterContext(
+    resumeId: string,
+    jobUrl: string,
+    jobText?: string,
+    jobTitle?: string,
+    company?: string
+  ) {
     const { data: resume, error: resumeErr } = await supabase
       .from('resumes')
       .select('id, user_id, parsed_text')
@@ -586,7 +592,7 @@ export class FieldMapperService {
     let jobDescription: { title: string; company: string; description: string; url: string; location?: string } | undefined;
     try {
       if (jobText && jobText.trim().length > 100) {
-        jobDescription = { title: '', company: '', description: jobText, url: jobUrl };
+        jobDescription = { title: jobTitle || '', company: company || '', description: jobText, url: jobUrl };
       } else {
         const jobCrawler = new JobCrawler();
         try {
@@ -611,7 +617,7 @@ export class FieldMapperService {
 
     try {
       coverLetter = await coverLetterGenerator.generateCoverLetter(
-        jobDescription || { title: '', company: '', description: '', url: jobUrl },
+        jobDescription || { title: jobTitle || '', company: company || '', description: '', url: jobUrl },
         userProfile,
         resumeText,
         jdSummary,
@@ -635,9 +641,11 @@ export class FieldMapperService {
   async generateCoverLetterOnly(
     resumeId: string,
     jobUrl: string,
-    jobText?: string
+    jobText?: string,
+    jobTitle?: string,
+    company?: string
   ): Promise<{ coverLetter: string; profileName: string }> {
-    const { coverLetter, profileName } = await this.buildCoverLetterContext(resumeId, jobUrl, jobText);
+    const { coverLetter, profileName } = await this.buildCoverLetterContext(resumeId, jobUrl, jobText, jobTitle, company);
     return { coverLetter, profileName };
   }
 
@@ -645,10 +653,12 @@ export class FieldMapperService {
     fields: ExtensionField[],
     resumeId: string,
     jobUrl: string,
-    jobText?: string
+    jobText?: string,
+    jobTitle?: string,
+    company?: string
   ): Promise<MapFieldsResult> {
     const { userProfile, structuredResume, resumeText, coverLetter, jdSummary, profileName } =
-      await this.buildCoverLetterContext(resumeId, jobUrl, jobText);
+      await this.buildCoverLetterContext(resumeId, jobUrl, jobText, jobTitle, company);
 
     const mappings = this.mapFieldsToData(fields, userProfile, coverLetter, resumeText, structuredResume);
     const resolved = await this.generateAnswersForAIFields(mappings, resumeText, structuredResume, jdSummary);

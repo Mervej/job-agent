@@ -6,14 +6,14 @@ const fieldMapper = new FieldMapperService();
 
 // Chrome extension endpoint: map extracted form fields to resume values
 router.post('/map-fields', async (req, res) => {
-  const { fields, resumeId, jobUrl, jobText } = req.body;
+  const { fields, resumeId, jobUrl, jobText, jobTitle, company } = req.body;
 
   if (!resumeId) return res.status(400).json({ error: 'resumeId is required' });
   if (!jobUrl) return res.status(400).json({ error: 'jobUrl is required' });
   if (!Array.isArray(fields)) return res.status(400).json({ error: 'fields must be an array' });
 
   try {
-    const result = await fieldMapper.mapFields(fields, resumeId, jobUrl, jobText);
+    const result = await fieldMapper.mapFields(fields, resumeId, jobUrl, jobText, jobTitle, company);
     res.json(result);
   } catch (error: any) {
     if (error.message === 'Resume not found') {
@@ -25,13 +25,13 @@ router.post('/map-fields', async (req, res) => {
 
 // Standalone cover-letter generation for the extension's manual "Generate Cover Letter" button
 router.post('/generate-cover-letter', async (req, res) => {
-  const { resumeId, jobUrl, jobText } = req.body;
+  const { resumeId, jobUrl, jobText, jobTitle, company } = req.body;
 
   if (!resumeId) return res.status(400).json({ error: 'resumeId is required' });
   if (!jobUrl) return res.status(400).json({ error: 'jobUrl is required' });
 
   try {
-    const result = await fieldMapper.generateCoverLetterOnly(resumeId, jobUrl, jobText);
+    const result = await fieldMapper.generateCoverLetterOnly(resumeId, jobUrl, jobText, jobTitle, company);
     res.json(result);
   } catch (error: any) {
     if (error.message === 'Resume not found') {

@@ -201,13 +201,18 @@ async function handleFetchCoverLetterPdf(text, companyName, profileName, sendRes
   }
 }
 
-async function handleMapFields({ fields, resumeId, jobUrl, jobText }, sendResponse) {
+async function handleMapFields({ fields, resumeId, jobUrl, jobText, jobTitle, company }, sendResponse) {
   try {
     const url = await backendReady;
     const res = await fetch(`${url}/apply/map-fields`, {
       method: 'POST',
       headers: await authHeaders(),
-      body: JSON.stringify({ fields, resumeId, jobUrl, ...(jobText ? { jobText } : {}) }),
+      body: JSON.stringify({
+        fields, resumeId, jobUrl,
+        ...(jobText ? { jobText } : {}),
+        ...(jobTitle ? { jobTitle } : {}),
+        ...(company ? { company } : {}),
+      }),
     });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
@@ -220,13 +225,18 @@ async function handleMapFields({ fields, resumeId, jobUrl, jobText }, sendRespon
   }
 }
 
-async function handleGenerateCoverLetter({ resumeId, jobUrl, jobText }, sendResponse) {
+async function handleGenerateCoverLetter({ resumeId, jobUrl, jobText, jobTitle, company }, sendResponse) {
   try {
     const url = await backendReady;
     const res = await fetch(`${url}/apply/generate-cover-letter`, {
       method: 'POST',
       headers: await authHeaders(),
-      body: JSON.stringify({ resumeId, jobUrl, ...(jobText ? { jobText } : {}) }),
+      body: JSON.stringify({
+        resumeId, jobUrl,
+        ...(jobText ? { jobText } : {}),
+        ...(jobTitle ? { jobTitle } : {}),
+        ...(company ? { company } : {}),
+      }),
     });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));

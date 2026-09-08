@@ -59,7 +59,10 @@ Do NOT include explanations -- output only the final cover letter.
     const userPrompt = this.buildUserPrompt(jobDescription, userProfile, resumeText, jdSummary, structuredResume);
 
     console.log('[CoverLetter] prompt >>>\n' + userPrompt + '\n<<<');
-    const result = await generateText(systemPrompt, userPrompt);
+    // 600 (the generateText default) was cutting 3-4 paragraph letters off mid-sentence —
+    // reasoning models (e.g. Groq's gpt-oss) also spend part of the budget on hidden
+    // reasoning tokens before the visible content even starts.
+    const result = await generateText(systemPrompt, userPrompt, 1200);
     return result;
   }
 
