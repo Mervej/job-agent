@@ -68,6 +68,38 @@ interface FieldMapping {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+/**
+ * profiles.experience rows are saved by upload.ts as { title, company, start, end, description }
+ * (the shape the profile-editing UI uses) — remap to StructuredResume's { role, startDate, endDate }
+ * so the AI prompt (and anything reading these keys directly) sees the fields it expects.
+ */
+function normalizeExperienceEntry(raw: any): StructuredResume['experience'][number] {
+  return {
+    company: raw?.company || '',
+    role: raw?.role || raw?.title || raw?.designation || raw?.jobTitle || '',
+    startDate: raw?.startDate || raw?.start || raw?.start_date || '',
+    endDate: raw?.endDate || raw?.end || raw?.end_date || '',
+    location: raw?.location || undefined,
+    description: raw?.description || raw?.summary || undefined,
+    achievements: Array.isArray(raw?.achievements) ? raw.achievements : undefined,
+  };
+}
+
+/**
+ * profiles.education rows are saved by upload.ts as { degree, school, year } — remap to
+ * StructuredResume's { institution, startDate, endDate } so the AI prompt sees the fields it expects.
+ */
+function normalizeEducationEntry(raw: any): StructuredResume['education'][number] {
+  return {
+    institution: raw?.institution || raw?.school || raw?.university || raw?.college || '',
+    degree: raw?.degree || raw?.qualification || '',
+    fieldOfStudy: raw?.fieldOfStudy || raw?.field_of_study || raw?.major || undefined,
+    startDate: raw?.startDate || raw?.start || raw?.start_year || '',
+    endDate: raw?.endDate || raw?.end || raw?.year || raw?.graduation_year || '',
+    description: raw?.description || undefined,
+  };
+}
+
 function buildOptionsPrompt(
   question: string,
   options: { value: string; text: string }[],
@@ -461,7 +493,7 @@ export class FieldMapperService {
 
   private async generateAnswersForAIFields(
     mappings: FieldMapping[],
-    _resumeText: string,
+    resumeText: string,
     structuredResume: StructuredResume,
     jdSummary: string
   ): Promise<FieldMapping[]> {
@@ -476,7 +508,7 @@ export class FieldMapperService {
 
     let answers: Record<string, string> = {};
     try {
-      answers = await generateStructuredFields(fieldSpecs, structuredResume, jdSummary);
+      answers = await generateStructuredFields(fieldSpecs, structuredResume, jdSummary, resumeText);
     } catch {
       return mappings;
     }
@@ -547,8 +579,8 @@ export class FieldMapperService {
         linkedin: profile?.linkedin || '',
         github: profile?.github || '',
       },
-      experience: Array.isArray(profile?.experience) ? profile.experience : [],
-      education: Array.isArray(profile?.education) ? profile.education : [],
+      experience: (Array.isArray(profile?.experience) ? profile.experience : []).map(normalizeExperienceEntry),
+      education: (Array.isArray(profile?.education) ? profile.education : []).map(normalizeEducationEntry),
       skills: Array.isArray(profile?.skills) ? profile.skills : [],
     };
 

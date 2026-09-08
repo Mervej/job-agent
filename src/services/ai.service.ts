@@ -134,19 +134,28 @@ export async function extractJDRequirements(jobText: string): Promise<string> {
   return generateText(systemPrompt, jobText, 300);
 }
 
+// Bounds prompt size/cost when a resume is unusually long — a couple thousand words
+// is far more than enough context for filling application fields.
+const RESUME_TEXT_CONTEXT_LIMIT = 6000;
+
 export async function generateStructuredFields(
   fields: FieldSpec[],
   structuredResume: StructuredResume,
-  jdSummary: string
+  jdSummary: string,
+  resumeText = ''
 ): Promise<Record<string, string>> {
   if (fields.length === 0) return {};
+
+  const truncatedResumeText = resumeText.length > RESUME_TEXT_CONTEXT_LIMIT
+    ? resumeText.slice(0, RESUME_TEXT_CONTEXT_LIMIT)
+    : resumeText;
 
   const BATCH_SIZE = 25;
   const results: Record<string, string> = {};
 
   for (let i = 0; i < fields.length; i += BATCH_SIZE) {
     const slice = fields.slice(i, i + BATCH_SIZE);
-    const batch = await _generateFieldBatch(slice, structuredResume, jdSummary);
+    const batch = await _generateFieldBatch(slice, structuredResume, jdSummary, truncatedResumeText);
     Object.assign(results, batch);
   }
 
@@ -156,7 +165,8 @@ export async function generateStructuredFields(
 async function _generateFieldBatch(
   fields: FieldSpec[],
   structuredResume: StructuredResume,
-  jdSummary: string
+  jdSummary: string,
+  resumeText = ''
 ): Promise<Record<string, string>> {
   if (config.provider === 'openai' && !config.openai.apiKey) {
     throw new Error('OPENAI_API_KEY not set');
@@ -169,14 +179,18 @@ async function _generateFieldBatch(
 
   const systemPrompt = `You are filling a job application for ${name}.
 Rules:
-- Use ONLY data from the resume below. Do not invent facts not present in the resume.
+- Use ONLY data from the resume information below (structured data and/or full resume text).
+  Do not invent facts not present in either source.
+- Prefer the structured data when it covers a field; fall back to the full resume text for
+  anything not captured there (e.g. education/institution names that were never entered as
+  structured profile data but do appear in the resume).
 - Follow each field's formatHint exactly — output only the value, nothing else.
 - If information is not in the resume, output an empty string "" for that field.
 - Return ONLY a valid JSON object mapping each field id to its answer string.
 
-Resume:
+Structured resume data:
 ${JSON.stringify(structuredResume, null, 2)}
-
+${resumeText ? `\nFull resume text (fallback source):\n${resumeText}\n` : ''}
 Job requirements:
 ${jdSummary || 'Not provided'}`;
 
