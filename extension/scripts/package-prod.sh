@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
-# Packages a local-dev variant of the extension.
-# Forces the backend URL to localhost:3000 and appends -local to the name.
-# Usage: bash extension/scripts/package-local.sh
-# Output: job-agent-extension-v<version>-local.zip (project root)
+# Packages a prod build of the extension always pointing to the deployed backend.
+# Usage: bash extension/scripts/package-prod.sh
+# Output: job-agent-extension-v<version>-prod.zip (project root)
 
 set -e
 
@@ -12,29 +11,19 @@ ROOT_DIR="$(cd "$EXT_DIR/.." && pwd)"
 TMP_DIR="$(mktemp -d)"
 
 VERSION=$(node -p "require('${EXT_DIR}/manifest.json').version")
-OUT="${ROOT_DIR}/job-agent-extension-v${VERSION}-local.zip"
+OUT="${ROOT_DIR}/job-agent-extension-v${VERSION}-prod.zip"
 
 # Copy extension into temp dir
 cp -r "$EXT_DIR/." "$TMP_DIR/"
 
-# Patch manifest: append (local) to name
-node -e "
-  const fs = require('fs');
-  const p = '${TMP_DIR}/manifest.json';
-  const m = JSON.parse(fs.readFileSync(p, 'utf8'));
-  m.name = m.name + ' (local)';
-  fs.writeFileSync(p, JSON.stringify(m, null, 2));
-"
-
-# Patch background.js: always use LOCAL_URL
+# Patch background.js: always use PROD_URL, skip localhost health check
 node -e "
   const fs = require('fs');
   const p = '${TMP_DIR}/background.js';
   let src = fs.readFileSync(p, 'utf8');
-  // Replace the auto-detect IIFE with a direct LOCAL_URL return
   src = src.replace(
     /const backendReady = \(async \(\) => \{[\s\S]*?\}\)\(\);/,
-    'const backendReady = Promise.resolve(LOCAL_URL);'
+    'const backendReady = Promise.resolve(PROD_URL);'
   );
   fs.writeFileSync(p, src);
 "
