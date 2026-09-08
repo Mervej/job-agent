@@ -69,7 +69,11 @@ function onFieldFilled({ selector, label, value, total, filled }) {
     $('fieldList').appendChild(item);
   }
   const valueEl = item.querySelector('.field-value');
-  valueEl.textContent = `✓ ${truncate(value, 20)}`;
+  // Status messages (✗ failed, ⚠ needs review, ⬇ downloaded, — skipped, etc.) already
+  // carry their own glyph — only prepend a checkmark for plain successfully-filled values.
+  const hasOwnStatusGlyph = /^[✗⚠⬇—]/.test(String(value || ''));
+  valueEl.textContent = hasOwnStatusGlyph ? truncate(value, 40) : `✓ ${truncate(value, 20)}`;
+  valueEl.title = String(value || '');
   valueEl.className = 'field-value filled';
 
   setStatus(`Filling fields... (${filled}/${total})`, true);

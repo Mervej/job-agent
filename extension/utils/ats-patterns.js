@@ -109,6 +109,11 @@ const JD_PAGE_PATTERNS = [
   { pattern: /greenhouse\.io\/jobs\/\d+$/, exclude: null },
 ];
 
+// Google Forms — never auto-detected as an apply page; only opened via manual
+// FORCE_OPEN (toolbar icon click), since forms.gle links are used for all kinds
+// of surveys, not just job applications.
+const GOOGLE_FORMS_PATTERN = /(docs\.google\.com\/forms\/|forms\.gle\/)/;
+
 /**
  * Returns true if the given URL matches a known ATS apply page.
  * @param {string} url
@@ -116,6 +121,15 @@ const JD_PAGE_PATTERNS = [
  */
 function isApplyPage(url) {
   return ATS_PATTERNS.some((pattern) => pattern.test(url));
+}
+
+/**
+ * Returns true if the URL is a Google Forms page.
+ * @param {string} url
+ * @returns {boolean}
+ */
+function isGoogleFormPage(url) {
+  return GOOGLE_FORMS_PATTERN.test(url);
 }
 
 /**

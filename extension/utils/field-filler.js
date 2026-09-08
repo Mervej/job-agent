@@ -33,6 +33,10 @@ async function fillField(selector, value, elementType, inputType, isCombobox) {
     if (elInputType === 'file' || (el.type || '').toLowerCase() === 'file') {
       return await fillFileInput(el, value);
     }
+    // Google Forms' radio/checkbox/dropdown/file widgets only react to browser-trusted
+    // events — a content script can't dispatch those, so these are always flagged for
+    // the user to answer manually instead of being sent through fillField at all.
+    if (['gform-radio', 'gform-checkbox', 'gform-dropdown', 'gform-file'].includes(elInputType)) return false;
     if (isCombobox || el.getAttribute('role') === 'combobox') return await fillCombobox(el, value);
     if (elInputType === 'checkbox') return fillCheckbox(el, value);
     if (elInputType === 'radio') return fillRadio(selector, value);

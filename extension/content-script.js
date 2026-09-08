@@ -21,6 +21,9 @@ const OWN_ORIGINS = ['job-agent-frontend.onrender.com', 'job-agent-backend-jg3v.
 
 function init() {
   if (OWN_ORIGINS.some(o => window.location.hostname === o)) return;
+  // Google Forms is manual-trigger only — never auto-inject, only via the
+  // toolbar icon's FORCE_OPEN message (listener below bypasses init() entirely).
+  if (isGoogleFormPage(window.location.href)) return;
   if (!isApplyPage(window.location.href) && !hasApplyForm()) return;
 
   // Avoid double-injection on re-runs
@@ -227,7 +230,7 @@ async function saveJdAndNavigate(navigateFn) {
  * Returns { label, value } for the panel status line.
  * If cover-letter upload fails, auto-downloads `{username}-{company}.pdf` as backup.
  */
-async function uploadFileField(fileField, coverLetter, allFields = [], fileIndex = 0, fileFields = []) {
+async function uploadFileField(fileField, coverLetter, allFields = [], fileIndex = 0, fileFields = [], nameHint = '') {
   const role = classifyFileFieldRole(fileField, fileIndex, fileFields);
   const displayLabel = role === 'coverLetter'
     ? (fileField.label && !/^drop\b/i.test(fileField.label) ? fileField.label : 'Cover Letter')
@@ -243,22 +246,25 @@ async function uploadFileField(fileField, coverLetter, allFields = [], fileIndex
       return { label: displayLabel, value: '— skipped (text filled)' };
     }
     if (coverLetter && coverLetter.trim().length > 50) {
+      const filename = buildCoverLetterFilename(nameHint || _profileName, _jobCompany);
       const clResp = await sendToBackground({
         type: 'FETCH_COVER_LETTER_PDF',
         text: coverLetter,
         companyName: _jobCompany,
-        profileName: _profileName,
+        profileName: nameHint || _profileName,
+        filename,
       });
       if (clResp.ok) {
-        const ok = await fillField(selector, `${clResp.base64},${clResp.filename}`, 'input', 'file', false);
+        const downloadName = clResp.filename || filename;
+        const ok = await fillField(selector, `${clResp.base64},${downloadName}`, 'input', 'file', false);
         if (ok) {
           return { label: displayLabel, value: '✓ uploaded PDF' };
         }
         // Upload failed — download so the user can attach manually
-        downloadPdfBase64(clResp.base64, clResp.filename);
+        downloadPdfBase64(clResp.base64, downloadName);
         return {
           label: displayLabel,
-          value: `✗ upload failed — downloaded ${clResp.filename}`,
+          value: `✗ upload failed — downloaded ${downloadName}`,
         };
       }
       return { label: displayLabel, value: `✗ PDF generation failed${clResp.error ? ': ' + clResp.error : ''}` };
@@ -266,12 +272,50 @@ async function uploadFileField(fileField, coverLetter, allFields = [], fileIndex
     return { label: displayLabel, value: '— no cover letter generated' };
   }
 
-  const fileResp = await sendToBackground({ type: 'FETCH_RESUME_FILE', resumeId: activeResumeId, profileName: _profileName });
+  const fileResp = await sendToBackground({ type: 'FETCH_RESUME_FILE', resumeId: activeResumeId, profileName: nameHint || _profileName });
   if (!fileResp.ok) {
     return { label: displayLabel, value: `✗ fetch failed: ${fileResp.error || 'unknown'}` };
   }
   const ok = await fillField(selector, `${fileResp.base64},${fileResp.filename}`, 'input', 'file', false);
   return { label: displayLabel, value: ok ? '✓ uploaded' : '✗ upload failed (check extension service worker logs)' };
+}
+
+/** `{Username}-{Company}.pdf` — never emit empty segments. */
+function buildCoverLetterFilename(profileName, companyName) {
+  const safe = (s) =>
+    (s || '')
+      .trim()
+      .replace(/\s+/g, '_')
+      .replace(/[^a-zA-Z0-9_-]/g, '');
+  const user = safe(profileName) || 'candidate';
+  const company = safe(companyName) || 'company';
+  return `${user}-${company}.pdf`;
+}
+
+/**
+ * Resolve display name from map-fields response without relying on DB alone.
+ * Prefer profileName, then structured resume, then first+last mappings.
+ */
+function resolveCandidateName(resp, fields) {
+  const direct =
+    (resp.profileName || '').trim() ||
+    (resp.structuredResume?.profileDetails?.name || '').trim();
+  if (direct) return direct;
+
+  let first = '';
+  let last = '';
+  for (const m of resp.mappings || []) {
+    if (!m.value) continue;
+    const f = (fields || []).find((x) => x.selector === m.selector) || {};
+    const info = `${f.label || ''} ${f.fieldName || ''} ${f.autocomplete || ''}`.toLowerCase();
+    if (!first && (/first\s*name|firstname|fname|given/.test(info) || f.autocomplete === 'given-name')) {
+      first = String(m.value).trim();
+    }
+    if (!last && (/last\s*name|lastname|lname|surname|family/.test(info) || f.autocomplete === 'family-name')) {
+      last = String(m.value).trim();
+    }
+  }
+  return [first, last].filter(Boolean).join(' ').trim();
 }
 
 /**
@@ -308,6 +352,43 @@ function classifyFileFieldRole(fileField, fileIndex, fileFields) {
     return fileIndex === 0 ? 'resume' : 'coverLetter';
   }
   return 'resume';
+}
+
+/**
+ * Google Forms file-upload questions render a Drive picker that can't be driven
+ * programmatically — fetch/generate the right PDF and trigger a browser download
+ * so the user just has to drag it into the picker themselves.
+ */
+async function handleGoogleFormFileQuestion(fileField, coverLetter, nameHint) {
+  const displayLabel = fileField.label || fileField.questionText || 'File upload';
+  const role = classifyFileFieldRole(fileField, 0, [fileField]);
+  const hasCoverLetter = !!(coverLetter && coverLetter.trim().length > 50);
+
+  if (role === 'coverLetter' && hasCoverLetter) {
+    const filename = buildCoverLetterFilename(nameHint || _profileName, _jobCompany);
+    const clResp = await sendToBackground({
+      type: 'FETCH_COVER_LETTER_PDF',
+      text: coverLetter,
+      companyName: _jobCompany,
+      profileName: nameHint || _profileName,
+      filename,
+    });
+    if (clResp.ok) {
+      const downloadName = clResp.filename || filename;
+      downloadPdfBase64(clResp.base64, downloadName);
+      return { label: displayLabel, value: `⬇ downloaded ${downloadName} — attach manually` };
+    }
+  }
+
+  const fileResp = await sendToBackground({ type: 'FETCH_RESUME_FILE', resumeId: activeResumeId, profileName: nameHint || _profileName });
+  if (fileResp.ok) {
+    downloadPdfBase64(fileResp.base64, fileResp.filename);
+    return { label: displayLabel, value: `⬇ downloaded ${fileResp.filename} — attach manually` };
+  }
+  if (!activeResumeId) {
+    return { label: displayLabel, value: '⚠ attach manually (no resume selected in panel)' };
+  }
+  return { label: displayLabel, value: `⚠ attach manually (${fileResp.error || 'resume fetch failed'})` };
 }
 
 /** Trigger a browser download of a PDF from base64 (backup when ATS upload fails). */
@@ -381,9 +462,13 @@ async function runFillCycle() {
     const jobUrl = storedJD?.url || window.location.href;
     const jobText = storedJD?.text || null;
 
+    // Google Forms file-upload questions use a Drive picker that can't be automated —
+    // keep them out of AI mapping entirely; they're flagged for manual completion below.
+    const mappableFields = fields.filter((f) => f.inputType !== 'gform-file');
+
     const resp = await sendToBackground({
       type: 'MAP_FIELDS',
-      payload: { fields, resumeId: activeResumeId, jobUrl, jobText },
+      payload: { fields: mappableFields, resumeId: activeResumeId, jobUrl, jobText },
     });
 
     if (!resp.ok) {
@@ -395,14 +480,9 @@ async function runFillCycle() {
     // JD has been used — clear it so it doesn't bleed into subsequent pages
     if (storedJD) await sendToBackground({ type: 'CLEAR_JD' });
 
-    // Store profile name for resume/cover-letter filenames; update company from stored JD if richer
-    _profileName =
-      resp.profileName ||
-      resp.structuredResume?.profileDetails?.name ||
-      _profileName ||
-      '';
+    // Store profile name for resume/cover-letter filenames
+    _profileName = resolveCandidateName(resp, fields) || _profileName || '';
     if (storedJD?.company) _jobCompany = storedJD.company;
-    // Prefer company from JD detect if still empty
     if (!_jobCompany) {
       const { jobCompany } = detectJobInfo();
       if (jobCompany) _jobCompany = jobCompany;
@@ -420,7 +500,7 @@ async function runFillCycle() {
     const handledFileSelectors = new Set();
     for (let i = 0; i < fileFields.length; i++) {
       const fileField = fileFields[i];
-      const result = await uploadFileField(fileField, coverLetter, fields, i, fileFields);
+      const result = await uploadFileField(fileField, coverLetter, fields, i, fileFields, _profileName);
       handledFileSelectors.add(fileField.selector);
       postToPanel({
         type: 'FIELD_FILLED',
@@ -429,6 +509,22 @@ async function runFillCycle() {
         value: result.value,
         filled: ++filled,
         total: Math.max(totalEstimate, fileFields.length),
+      });
+      await sleep(FILL_DELAY_MS);
+    }
+
+    // Google Forms file-upload questions use a Drive picker that can't be automated —
+    // generate/fetch the right PDF and download it so the user can attach it manually.
+    const gformFileFields = fields.filter((f) => f.inputType === 'gform-file');
+    for (const f of gformFileFields) {
+      const result = await handleGoogleFormFileQuestion(f, coverLetter, _profileName);
+      postToPanel({
+        type: 'FIELD_FILLED',
+        selector: f.selector,
+        label: result.label,
+        value: result.value,
+        filled: ++filled,
+        total: Math.max(totalEstimate, filled),
       });
       await sleep(FILL_DELAY_MS);
     }
@@ -451,6 +547,28 @@ async function runFillCycle() {
         continue;
       }
       if (qt) answeredQuestions.add(qt);
+
+      // Google Forms' radio/checkbox/dropdown widgets only respond to browser-trusted
+      // clicks, which a content script can't produce — always surface the AI's
+      // suggested answer for manual click instead of attempting to fill it.
+      if (['gform-radio', 'gform-checkbox', 'gform-dropdown'].includes(fieldMeta.inputType)) {
+        flagged.push({
+          selector,
+          label: fieldMeta.questionText || fieldMeta.label || selector,
+          value: value || '',
+          isTextarea: false,
+        });
+        _flaggedFieldMeta[selector] = fieldMeta;
+        postToPanel({
+          type: 'FIELD_FILLED',
+          selector,
+          label: fieldMeta.questionText || fieldMeta.label || selector,
+          value: value ? `⚠ click "${value}" yourself` : '⚠ needs manual answer',
+          filled: ++filled,
+          total: mappings.length,
+        });
+        continue;
+      }
 
       if (!value) continue;
 

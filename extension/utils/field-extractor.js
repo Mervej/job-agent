@@ -67,7 +67,95 @@ function extractFields(doc = document) {
     fields.push(field);
   });
 
+  // Google Forms renders choice/dropdown/file questions as custom ARIA widgets
+  // (div[role=radio|checkbox|listbox], not native inputs) — extract those separately.
+  // Gated to Google Forms pages so no other ATS's custom widgets are affected.
+  if (typeof isGoogleFormPage === 'function' && isGoogleFormPage(window.location.href)) {
+    fields.push(...extractGoogleFormFields(doc));
+  }
+
   return fields;
+}
+
+// ─── Google Forms custom widgets ───────────────────────────────────────────────
+
+/**
+ * Extracts Google Forms' custom-widget questions (multiple choice, checkboxes,
+ * dropdown, file upload) that don't use native input/select elements.
+ * One field per question — options/choices are read from the question's
+ * div[role=radio|checkbox|option] children.
+ */
+function extractGoogleFormFields(doc) {
+  const fields = [];
+
+  doc.querySelectorAll('[role="listitem"]').forEach((container, index) => {
+    if (isHidden(container, false)) return;
+    // Google Forms embeds a hidden state <input> inside every radio/checkbox
+    // container — ignore it; only a *visible* native control (e.g. an "Other: __"
+    // free-text option) should cause this question to be skipped.
+    if (container.querySelector('input:not([type="hidden"]), textarea, select, div[contenteditable="true"]')) return;
+
+    const radios = container.querySelectorAll('[role="radio"]');
+    const checkboxes = container.querySelectorAll('[role="checkbox"]');
+    const listbox = container.querySelector('[role="listbox"]');
+
+    let inputType;
+    let options;
+
+    if (radios.length > 0) {
+      inputType = 'gform-radio';
+      options = Array.from(radios).map((r) => ({ value: gformOptionText(r), text: gformOptionText(r) }));
+    } else if (checkboxes.length > 0) {
+      inputType = 'gform-checkbox';
+      options = Array.from(checkboxes).map((c) => ({ value: gformOptionText(c), text: gformOptionText(c) }));
+    } else if (listbox) {
+      inputType = 'gform-dropdown';
+      const opts = container.querySelectorAll('[role="option"]');
+      options = Array.from(opts).map((o) => ({ value: gformOptionText(o), text: gformOptionText(o) }));
+    } else if (/add file/i.test(container.textContent || '')) {
+      // Drive-picker file upload — can't be automated (cross-origin picker UI).
+      // Extracted so the panel can flag it for the user to attach manually.
+      inputType = 'gform-file';
+    } else {
+      return;
+    }
+
+    const questionText = getGFormQuestionText(container);
+    if (!questionText) return;
+
+    fields.push({
+      selector: stampGFormSelector(container, index),
+      elementType: 'div',
+      inputType,
+      fieldName: `gform_field_${index}`,
+      label: questionText,
+      questionText,
+      required: /\*\s*$/.test(container.querySelector('[role="heading"]')?.textContent || ''),
+      options,
+    });
+  });
+
+  return fields;
+}
+
+function gformOptionText(el) {
+  return (el.getAttribute('data-answer-value') || el.getAttribute('data-value') || el.getAttribute('aria-label') || el.textContent || '').trim();
+}
+
+function getGFormQuestionText(container) {
+  const heading = container.querySelector('[role="heading"]');
+  if (!heading) return '';
+  return (heading.textContent || '').replace(/\*\s*$/, '').trim();
+}
+
+/** Stamps a unique data attribute on the question container so it can be re-found at fill time. */
+function stampGFormSelector(el, index) {
+  let stamp = el.getAttribute('data-job-agent');
+  if (!stamp) {
+    stamp = `gform-${index}-${Date.now()}`;
+    el.setAttribute('data-job-agent', stamp);
+  }
+  return `[data-job-agent="${stamp}"]`;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -112,8 +200,16 @@ function makeSelector(el, index) {
   // attribute selectors, causing querySelector to return null.
   if (name && tag === 'input' && type && !name.includes('[') && !name.includes(']')) return `${tag}[type="${type}"][name="${name}"]`;
   if (name) return `${tag}[name="${name}"]`;
-  if (aria) return `${tag}[aria-label="${aria}"]`;
-  if (placeholder) return `${tag}[placeholder="${placeholder}"]`;
+  // aria-label/placeholder aren't guaranteed unique (e.g. Google Forms sets aria-label="Your answer"
+  // on every paragraph-type question) — only use them when they actually identify one element.
+  if (aria) {
+    const sel = `${tag}[aria-label="${aria}"]`;
+    if (document.querySelectorAll(sel).length === 1) return sel;
+  }
+  if (placeholder) {
+    const sel = `${tag}[placeholder="${placeholder}"]`;
+    if (document.querySelectorAll(sel).length === 1) return sel;
+  }
 
   // File inputs often have no stable attributes (Rippling, etc.). Stamp a unique marker so
   // fillField can reliably re-find the same element later.
@@ -123,7 +219,14 @@ function makeSelector(el, index) {
     return `input[type="file"][data-job-agent="${stamp}"]`;
   }
 
-  return `${tag}:nth-of-type(${index + 1})`;
+  // Last resort: stamp a unique marker instead of nth-of-type(), which counts same-tag
+  // siblings under the SAME parent — not global document order. Any element that falls
+  // through to here without a distinguishing attribute (e.g. Google Forms inputs, which
+  // have no id/name/aria-label/placeholder and are each the sole input under their
+  // wrapper) would otherwise all generate the identical selector "input:nth-of-type(1)".
+  const stamp = el.getAttribute('data-job-agent') || `field-${index}-${Date.now()}`;
+  el.setAttribute('data-job-agent', stamp);
+  return `${tag}[data-job-agent="${stamp}"]`;
 }
 
 function getLabel(el) {
