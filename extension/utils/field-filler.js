@@ -1,9 +1,12 @@
 /**
  * Fills a single form field identified by `selector` with `value`.
  * Dispatches synthetic input/change events so React/Vue state updates.
+ * `root` defaults to `document`; pass a shadow-root-scoped element (e.g. LinkedIn's Easy
+ * Apply modal, which renders inside a shadow root invisible to document.querySelector) to
+ * resolve the selector there instead.
  */
-async function fillField(selector, value, elementType, inputType, isCombobox) {
-  let el = document.querySelector(selector);
+async function fillField(selector, value, elementType, inputType, isCombobox, root = document) {
+  let el = root.querySelector(selector);
 
   // Fallback: CSS parsers fail on compound selectors when name contains brackets
   // (e.g. input[type="text"][name="foo[bar][][baz]"] returns null).
@@ -12,15 +15,15 @@ async function fillField(selector, value, elementType, inputType, isCombobox) {
     const nameMatch = selector.match(/\[name="([^"]+)"\]/);
     if (nameMatch) {
       const name = nameMatch[1];
-      el = document.querySelector(`[name="${name}"]`)
-        || [...document.querySelectorAll('input,textarea,select')].find(e => e.name === name)
+      el = root.querySelector(`[name="${name}"]`)
+        || [...root.querySelectorAll('input,textarea,select')].find(e => e.name === name)
         || null;
     }
   }
 
   // File inputs on Rippling/FileDrop often lack name/id — resolve by label/testid/stamp
   if (!el && (inputType === 'file' || /type="file"|data-job-agent|data-testid/.test(selector))) {
-    el = findFileInput(selector, value);
+    el = findFileInput(selector, value, root);
   }
 
   if (!el) return false;
@@ -39,7 +42,7 @@ async function fillField(selector, value, elementType, inputType, isCombobox) {
     if (['gform-radio', 'gform-checkbox', 'gform-dropdown', 'gform-file'].includes(elInputType)) return false;
     if (isCombobox || el.getAttribute('role') === 'combobox') return await fillCombobox(el, value);
     if (elInputType === 'checkbox') return fillCheckbox(el, value);
-    if (elInputType === 'radio') return fillRadio(selector, value);
+    if (elInputType === 'radio') return fillRadio(selector, value, root);
     if (tag === 'select') return fillSelect(el, value);
     if (el.getAttribute('contenteditable') === 'true') return fillContentEditable(el, value);
 
@@ -53,19 +56,19 @@ async function fillField(selector, value, elementType, inputType, isCombobox) {
 /**
  * Resolve a file input when the stored selector is stale or the ATS omitted name/id.
  */
-function findFileInput(selector, valueHint) {
+function findFileInput(selector, valueHint, root = document) {
   const testIdMatch = selector.match(/data-testid="([^"]+)"/);
   if (testIdMatch) {
-    const byTestId = document.querySelector(`[data-testid="${testIdMatch[1]}"]`);
+    const byTestId = root.querySelector(`[data-testid="${testIdMatch[1]}"]`);
     if (byTestId && (byTestId.type || '').toLowerCase() === 'file') return byTestId;
   }
   const stampMatch = selector.match(/data-job-agent="([^"]+)"/);
   if (stampMatch) {
-    const byStamp = document.querySelector(`[data-job-agent="${stampMatch[1]}"]`);
+    const byStamp = root.querySelector(`[data-job-agent="${stampMatch[1]}"]`);
     if (byStamp) return byStamp;
   }
 
-  const files = [...document.querySelectorAll('input[type="file"], input[type="File"]')];
+  const files = [...root.querySelectorAll('input[type="file"], input[type="File"]')];
   if (files.length === 1) return files[0];
 
   const hint = `${valueHint || ''} ${selector}`.toLowerCase();
@@ -139,14 +142,14 @@ function fillCheckbox(el, value) {
   return true;
 }
 
-function fillRadio(selectorBase, value) {
+function fillRadio(selectorBase, value, root = document) {
   const nameMatch = selectorBase.match(/\[name="([^"]+)"\]/);
 
   let groupName;
   if (nameMatch) {
     groupName = nameMatch[1];
   } else {
-    const anchor = document.querySelector(selectorBase);
+    const anchor = root.querySelector(selectorBase);
     if (!anchor || !anchor.name) return false;
     groupName = anchor.name;
   }
@@ -155,9 +158,9 @@ function fillRadio(selectorBase, value) {
   // (the CSS selector can throw if the name contains special characters)
   let radios;
   try {
-    radios = document.querySelectorAll(`input[type="radio"][name="${groupName}"]`);
+    radios = root.querySelectorAll(`input[type="radio"][name="${groupName}"]`);
   } catch (_) {
-    radios = [...document.querySelectorAll('input[type="radio"]')].filter(r => r.name === groupName);
+    radios = [...root.querySelectorAll('input[type="radio"]')].filter(r => r.name === groupName);
   }
 
   if (!radios.length) return false;
@@ -472,7 +475,7 @@ function getRadioLabel(radio) {
   const ariaLabel = radio.getAttribute('aria-label');
   if (ariaLabel) return ariaLabel;
   if (radio.id) {
-    const label = document.querySelector(`label[for="${radio.id}"]`);
+    const label = radio.getRootNode().querySelector(`label[for="${radio.id}"]`);
     if (label) return label.textContent?.trim() || '';
   }
   const parentLabel = radio.closest('label');

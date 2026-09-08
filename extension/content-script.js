@@ -14,6 +14,7 @@ let _flaggedFieldMeta = {}; // selector → fieldMeta, populated when flagging, 
 let _pendingNavigation = false; // set before intentional Apply-button navigation so MutationObserver restarts the flow
 let _profileName = ''; // full name from backend profile, used for resume filename
 let _jobCompany = ''; // company name used for cover letter filename
+let _linkedInDialog = null; // the Easy Apply modal element, while a LinkedIn flow is active/paused for review
 
 // ─── Bootstrap ───────────────────────────────────────────────────────────────
 
@@ -21,9 +22,10 @@ const OWN_ORIGINS = ['job-agent-frontend.onrender.com', 'job-agent-backend-jg3v.
 
 function init() {
   if (OWN_ORIGINS.some(o => window.location.hostname === o)) return;
-  // Google Forms is manual-trigger only — never auto-inject, only via the
+  // Google Forms and LinkedIn are manual-trigger only — never auto-inject, only via the
   // toolbar icon's FORCE_OPEN message (listener below bypasses init() entirely).
   if (isGoogleFormPage(window.location.href)) return;
+  if (isLinkedInJobPage(window.location.href)) return;
   if (!isApplyPage(window.location.href) && !hasApplyForm()) return;
 
   // Avoid double-injection on re-runs
@@ -131,7 +133,238 @@ async function startFlow() {
     return;
   }
 
+  if (isLinkedInJobPage(window.location.href)) {
+    armLinkedInModalWatcher();
+    return;
+  }
+
   await runFillCycle();
+}
+
+// ─── LinkedIn Easy Apply ───────────────────────────────────────────────────────
+//
+// LinkedIn's Easy Apply modal renders inside a shadow root (#interop-outlet), with no URL
+// change to hook into like Lever/Ashby's JD→apply-page navigation. Once inside that shadow
+// root, all form controls observed so far are plain native HTML (see specs/linkedin-easy-apply.md)
+// — the only real wrinkle is that every selector must be resolved against the modal element,
+// not `document`, since document.querySelector can't see into a shadow root.
+
+const LINKEDIN_MODAL_HOST_SELECTOR = '#interop-outlet';
+let _linkedInModalObserver = null;
+
+/**
+ * Finds LinkedIn's own "Easy Apply" button on the job posting (light DOM, outside the
+ * modal's shadow root).
+ */
+function findLinkedInEasyApplyButton() {
+  const byAriaLabel = document.querySelector(
+    'a[aria-label="LinkedIn Apply to this job"], button[aria-label="LinkedIn Apply to this job"]'
+  );
+  if (byAriaLabel) return byAriaLabel;
+  return [...document.querySelectorAll('a, button')].find((el) => {
+    const text = (el.textContent || '').trim();
+    const aria = el.getAttribute('aria-label') || '';
+    return /easy apply/i.test(text) || /easy apply/i.test(aria) || /apply to this job/i.test(aria);
+  }) || null;
+}
+
+/**
+ * LinkedIn's outer "Apply" button only responds to a real pointerdown/mousedown/click
+ * sequence — a bare `.click()` does nothing (confirmed live), unlike the buttons inside
+ * the Easy Apply modal itself, which respond to plain .click() fine. Same trick already
+ * used for React-Select-style dropdowns elsewhere in this file (see fillCombobox).
+ */
+function clickLinkedInEasyApplyButton(el) {
+  const rect = el.getBoundingClientRect();
+  const opts = {
+    bubbles: true, cancelable: true, composed: true, view: window, button: 0,
+    clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2,
+  };
+  for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+    const Ctor = type.startsWith('pointer') ? PointerEvent : MouseEvent;
+    el.dispatchEvent(new Ctor(type, opts));
+  }
+}
+
+/**
+ * Polls for LinkedIn's Easy Apply shadow host, arms a watcher for the modal dialog
+ * appearing, then clicks "Easy Apply" itself so the user doesn't have to.
+ */
+function armLinkedInModalWatcher(retriesLeft = 10) {
+  const host = document.querySelector(LINKEDIN_MODAL_HOST_SELECTOR);
+  if (!host || !host.shadowRoot) {
+    if (retriesLeft <= 0) {
+      postToPanel({ type: 'STATUS', text: "Couldn't find LinkedIn's apply modal host — try reloading the page.", showSpinner: false });
+      return;
+    }
+    setTimeout(() => armLinkedInModalWatcher(retriesLeft - 1), 500);
+    return;
+  }
+
+  if (_linkedInModalObserver) _linkedInModalObserver.disconnect();
+  _linkedInModalObserver = new MutationObserver(() => {
+    const dialog = host.shadowRoot.querySelector('div[role="dialog"]');
+    if (dialog && !dialog.dataset.jobAgentHandled) {
+      dialog.dataset.jobAgentHandled = 'true';
+      runLinkedInFillCycle(dialog);
+    }
+  });
+  _linkedInModalObserver.observe(host.shadowRoot, { childList: true, subtree: true });
+
+  const applyBtn = findLinkedInEasyApplyButton();
+  if (applyBtn) {
+    postToPanel({ type: 'STATUS', text: 'Opening Easy Apply…', showSpinner: true });
+    tryClickLinkedInEasyApply(applyBtn, host, 3);
+  } else {
+    postToPanel({ type: 'STATUS', text: 'Ready — click "Easy Apply" on the job posting.', showSpinner: false });
+  }
+}
+
+/**
+ * The click sequence is confirmed to work, but flaky in practice — likely a race with
+ * LinkedIn's own click-handler hydration right after page load. Verify the modal actually
+ * opened before giving up, retrying a couple of times rather than assuming one click works.
+ */
+async function tryClickLinkedInEasyApply(el, host, attemptsLeft) {
+  clickLinkedInEasyApplyButton(el);
+  await sleep(800);
+  if (host.shadowRoot.querySelector('div[role="dialog"]')) return;
+
+  if (attemptsLeft > 1) {
+    await tryClickLinkedInEasyApply(el, host, attemptsLeft - 1);
+    return;
+  }
+  postToPanel({ type: 'STATUS', text: "Couldn't open Easy Apply automatically — click it yourself on the job posting.", showSpinner: false });
+}
+
+/**
+ * Steps through the Easy Apply wizard: fill the current step's fields, click Next/Review,
+ * repeat. Stops at the final review step without ever clicking Submit (never auto-submit —
+ * matches the Google Forms decision, and is more conservative given LinkedIn's own
+ * automated-behavior detection can restrict accounts). Required fields LinkedIn blocks
+ * "Next" on are routed into the same NEEDS_REVIEW flagged-panel flow used elsewhere.
+ */
+async function runLinkedInFillCycle(dialog) {
+  if (isFilling) return;
+  isFilling = true;
+  _linkedInDialog = dialog;
+  postToPanel({ type: 'STATUS', text: 'Easy Apply modal detected — filling…', showSpinner: true });
+
+  const flagged = [];
+  let filled = 0;
+
+  try {
+    for (let step = 0; step < 15; step++) {
+      await sleep(500); // let the step render
+
+      if (findLinkedInSubmitButton(dialog)) {
+        postToPanel({ type: 'STATUS', text: '✅ Reached the final review step — review and click Submit yourself.', showSpinner: false });
+        _linkedInDialog = null;
+        break;
+      }
+
+      const fields = extractFields(dialog);
+      if (fields.length > 0) {
+        filled = await fillLinkedInStepFields(dialog, fields, flagged, filled);
+      }
+
+      const advanceBtn = dialog.querySelector('button[aria-label="Review your application"]')
+        || dialog.querySelector('[data-easy-apply-next-button]');
+      if (!advanceBtn) {
+        postToPanel({ type: 'STATUS', text: 'No further step controls found — stopping here for manual review.', showSpinner: false });
+        _linkedInDialog = null;
+        break;
+      }
+
+      advanceBtn.click();
+      await sleep(600);
+
+      const blockingErrors = dialog.querySelectorAll('.fb-dash-form-element .artdeco-inline-feedback--error');
+      if (blockingErrors.length > 0) {
+        flagLinkedInBlockedQuestions(dialog, flagged);
+        postToPanel({ type: 'STATUS', text: '⚠ Some required questions need your input — see the review list below.', showSpinner: false });
+        break; // leave _linkedInDialog set so CONTINUE can resume this same modal
+      }
+    }
+
+    if (flagged.length > 0) postToPanel({ type: 'NEEDS_REVIEW', flagged });
+  } finally {
+    isFilling = false;
+  }
+}
+
+function findLinkedInSubmitButton(dialog) {
+  return [...dialog.querySelectorAll('button')].find(
+    (b) => /submit application/i.test(b.getAttribute('aria-label') || '') || /submit application/i.test(b.textContent || '')
+  );
+}
+
+/** Maps and fills the current step's fields via the same MAP_FIELDS/fillField pipeline used elsewhere. */
+async function fillLinkedInStepFields(dialog, fields, flagged, filledCount) {
+  const resp = await sendToBackground({
+    type: 'MAP_FIELDS',
+    payload: { fields, resumeId: activeResumeId, jobUrl: window.location.href },
+  });
+  if (!resp.ok) return filledCount;
+
+  let filled = filledCount;
+
+  for (const mapping of resp.mappings) {
+    const { selector, value, confidence } = mapping;
+    const fieldMeta = fields.find((f) => f.selector === selector) || {};
+    if (!value) continue;
+
+    if (confidence < CONFIDENCE_THRESHOLD) {
+      flagged.push({
+        selector,
+        label: fieldMeta.questionText || fieldMeta.label || selector,
+        value,
+        isTextarea: fieldMeta.elementType === 'textarea',
+      });
+      _flaggedFieldMeta[selector] = fieldMeta;
+      continue;
+    }
+
+    const ok = await fillField(selector, value, fieldMeta.elementType, fieldMeta.inputType, fieldMeta.isCombobox, dialog);
+    postToPanel({
+      type: 'FIELD_FILLED',
+      selector,
+      label: fieldMeta.questionText || fieldMeta.label || selector,
+      value: ok ? value : '✗ failed',
+      filled: ++filled,
+      total: resp.mappings.length,
+    });
+    await sleep(FILL_DELAY_MS);
+  }
+
+  return filled;
+}
+
+/** Surfaces any question LinkedIn is still blocking "Next" on (empty/unmapped required fields). */
+function flagLinkedInBlockedQuestions(dialog, flagged) {
+  const errorBlocks = [...dialog.querySelectorAll('.fb-dash-form-element')].filter((b) =>
+    b.querySelector('.artdeco-inline-feedback--error')
+  );
+
+  errorBlocks.forEach((block, i) => {
+    const input = block.querySelector('input, select, textarea');
+    if (!input) return;
+
+    const selector = makeSelector(input, i);
+    if (flagged.some((f) => f.selector === selector)) return; // already flagged above
+
+    const legend = block.querySelector('fieldset legend');
+    const label = block.querySelector('label');
+    const questionText = (legend?.textContent || label?.textContent || '').replace(/\s+/g, ' ').trim();
+
+    _flaggedFieldMeta[selector] = { selector, elementType: input.tagName.toLowerCase(), inputType: input.type };
+    flagged.push({
+      selector,
+      label: questionText || 'Required question',
+      value: '',
+      isTextarea: input.tagName === 'TEXTAREA',
+    });
+  });
 }
 
 async function waitForFields(maxWaitMs = 12000) {
@@ -1004,14 +1237,17 @@ async function onPanelMessage(event) {
   }
 
   if (msg.type === 'CONTINUE') {
+    // LinkedIn's Easy Apply modal lives in a shadow root, invisible to document.querySelector —
+    // resolve against it while a LinkedIn flow is active/paused for review.
+    const root = _linkedInDialog || document;
     console.log('[JobAgent] CONTINUE received, edits:', msg.edits);
     if (msg.edits) {
       for (const [selector, value] of Object.entries(msg.edits)) {
         if (!value) { console.log('[JobAgent] skipping empty value for', selector); continue; }
         const fieldMeta = _flaggedFieldMeta[selector] || {};
-        const el = document.querySelector(selector);
+        const el = root.querySelector(selector);
         console.log('[JobAgent] filling', selector, '=', value, '| el found:', !!el, '| inputType:', fieldMeta.inputType, el?.type);
-        const ok = await fillField(selector, value, fieldMeta.elementType, fieldMeta.inputType, fieldMeta.isCombobox);
+        const ok = await fillField(selector, value, fieldMeta.elementType, fieldMeta.inputType, fieldMeta.isCombobox, root);
         console.log('[JobAgent] fill result:', ok ? '✓' : '✗ FAILED', 'for', selector);
         postToPanel({
           type: 'FIELD_FILLED',
@@ -1025,12 +1261,20 @@ async function onPanelMessage(event) {
       }
     }
     _flaggedFieldMeta = {};
-    await advanceOrFinish();
+    if (_linkedInDialog) {
+      await runLinkedInFillCycle(_linkedInDialog);
+    } else {
+      await advanceOrFinish();
+    }
   }
 
   if (msg.type === 'RESCAN') {
     isFilling = false;
-    await runFillCycle();
+    if (_linkedInDialog) {
+      await runLinkedInFillCycle(_linkedInDialog);
+    } else {
+      await runFillCycle();
+    }
   }
 
   if (msg.type === 'CLOSE') {

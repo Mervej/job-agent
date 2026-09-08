@@ -168,7 +168,13 @@ function isHidden(el, isSelect) {
   if (isSelect) return false; // allow hidden selects (custom dropdowns)
   if (el.hasAttribute('hidden') || el.getAttribute('aria-hidden') === 'true') return true;
   const style = window.getComputedStyle(el);
-  if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return true;
+  if (style.display === 'none' || style.visibility === 'hidden') return true;
+  // opacity:0 is a common accessible custom-radio/checkbox pattern (the native input is
+  // visually transparent while CSS draws the visible circle/box over it) — it's still
+  // real and interactive, just not painted. Only treat opacity:0 as truly hidden for
+  // other input types, where it usually does mean "not actually usable".
+  const isChoiceInput = el.tagName === 'INPUT' && (el.type === 'radio' || el.type === 'checkbox');
+  if (!isChoiceInput && style.opacity === '0') return true;
   const rect = el.getBoundingClientRect();
   return rect.width === 0 || rect.height === 0;
 }
@@ -202,13 +208,14 @@ function makeSelector(el, index) {
   if (name) return `${tag}[name="${name}"]`;
   // aria-label/placeholder aren't guaranteed unique (e.g. Google Forms sets aria-label="Your answer"
   // on every paragraph-type question) — only use them when they actually identify one element.
+  const root = el.getRootNode();
   if (aria) {
     const sel = `${tag}[aria-label="${aria}"]`;
-    if (document.querySelectorAll(sel).length === 1) return sel;
+    if (root.querySelectorAll(sel).length === 1) return sel;
   }
   if (placeholder) {
     const sel = `${tag}[placeholder="${placeholder}"]`;
-    if (document.querySelectorAll(sel).length === 1) return sel;
+    if (root.querySelectorAll(sel).length === 1) return sel;
   }
 
   // File inputs often have no stable attributes (Rippling, etc.). Stamp a unique marker so
@@ -236,19 +243,33 @@ function getLabel(el) {
     if (fileTitle) return fileTitle;
   }
 
+  // Radio/checkbox groups are often labeled via <fieldset><legend> (the question, e.g.
+  // "Gender") rather than the per-option <label for="..."> (which describes that option
+  // only, e.g. "Male") — check this first so the field's overall label is the question.
+  if (el.type === 'radio' || el.type === 'checkbox') {
+    const fieldset = el.closest('fieldset');
+    const legend = fieldset?.querySelector('legend');
+    const t = (legend?.textContent || '').trim();
+    if (t && !isDropzoneHelperText(t)) return t;
+  }
+
   const ariaLabel = el.getAttribute('aria-label');
   if (ariaLabel?.trim() && !isDropzoneHelperText(ariaLabel)) return ariaLabel.trim();
+
+  // Use the element's own root (document, or a ShadowRoot for widgets like LinkedIn's
+  // Easy Apply modal) so id-based lookups work regardless of where el actually lives.
+  const root = el.getRootNode();
 
   const ariaLabelledBy = el.getAttribute('aria-labelledby');
   if (ariaLabelledBy) {
     const text = ariaLabelledBy.split(/\s+/)
-      .map(id => document.getElementById(id)?.textContent?.trim())
+      .map(id => root.getElementById?.(id)?.textContent?.trim())
       .filter(Boolean).join(' ');
     if (text && !isDropzoneHelperText(text)) return text;
   }
 
   if (el.id) {
-    const forLabel = document.querySelector(`label[for="${el.id}"]`);
+    const forLabel = root.querySelector(`label[for="${el.id}"]`);
     const t = forLabel?.textContent?.trim() || '';
     if (t && !isDropzoneHelperText(t)) return t;
   }
@@ -384,13 +405,30 @@ function getOptions(el, tag, inputType) {
     return Array.from(el.options).map(opt => ({ value: opt.value, text: (opt.textContent || '').trim() }));
   }
   if (inputType === 'radio' && el.name) {
+    const root = el.getRootNode();
     let radios;
     try {
-      radios = document.querySelectorAll(`input[type="radio"][name="${el.name}"]`);
+      radios = root.querySelectorAll(`input[type="radio"][name="${el.name}"]`);
     } catch (_) {
-      radios = [...document.querySelectorAll('input[type="radio"]')].filter(r => r.name === el.name);
+      radios = [...root.querySelectorAll('input[type="radio"]')].filter(r => r.name === el.name);
     }
-    return Array.from(radios).map(r => ({ value: r.value, text: getLabel(r) || r.value }));
+    return Array.from(radios).map(r => ({ value: r.value, text: getRadioOptionLabel(r) || r.value }));
   }
   return undefined;
+}
+
+/**
+ * An individual radio/checkbox option's own visible text (e.g. "Male"), as opposed to
+ * getLabel() which returns the group's overall question (e.g. "Gender" via fieldset/legend)
+ * when called on the same element.
+ */
+function getRadioOptionLabel(el) {
+  const root = el.getRootNode();
+  if (el.id) {
+    const forLabel = root.querySelector(`label[for="${el.id}"]`);
+    const t = forLabel?.textContent?.trim() || '';
+    if (t) return t;
+  }
+  const parentLabel = el.closest('label');
+  return parentLabel ? (parentLabel.textContent || '').trim() : '';
 }

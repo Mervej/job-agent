@@ -114,6 +114,10 @@ const JD_PAGE_PATTERNS = [
 // of surveys, not just job applications.
 const GOOGLE_FORMS_PATTERN = /(docs\.google\.com\/forms\/|forms\.gle\/)/;
 
+// LinkedIn job pages — manual-trigger only (toolbar icon), same rationale as Google Forms:
+// browsing LinkedIn jobs is extremely common and not always followed by an Easy Apply.
+const LINKEDIN_JOBS_PATTERN = /linkedin\.com\/jobs\//;
+
 /**
  * Returns true if the given URL matches a known ATS apply page.
  * @param {string} url
@@ -130,6 +134,15 @@ function isApplyPage(url) {
  */
 function isGoogleFormPage(url) {
   return GOOGLE_FORMS_PATTERN.test(url);
+}
+
+/**
+ * Returns true if the URL is a LinkedIn jobs page.
+ * @param {string} url
+ * @returns {boolean}
+ */
+function isLinkedInJobPage(url) {
+  return LINKEDIN_JOBS_PATTERN.test(url);
 }
 
 /**
