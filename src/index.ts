@@ -7,6 +7,8 @@ import applyRouter from './api/apply';
 import resumesRouter from './api/resumes';
 import profileRouter from './api/profile';
 import { requireAuth } from './middleware/auth';
+import { generateText } from './services/ai.service';
+import aiConfig from './config/ai.config';
 
 const app = express();
 
@@ -38,6 +40,22 @@ app.use(express.json({ limit: '10mb' }));
 
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok' });
+});
+
+// Makes a real call to the configured AI provider — catches config drift (bad API key,
+// decommissioned model, unreachable Ollama) that generateText() callers silently swallow.
+app.get('/health/ai', async (_req, res) => {
+  const model =
+    aiConfig.provider === 'groq' ? aiConfig.groq.model :
+    aiConfig.provider === 'ollama' ? aiConfig.ollama.model :
+    aiConfig.model;
+  const started = Date.now();
+  try {
+    const reply = await generateText('Reply with exactly one word.', 'Say "ok".', 5);
+    res.json({ status: 'ok', provider: aiConfig.provider, model, latencyMs: Date.now() - started, reply: reply.trim().slice(0, 50) });
+  } catch (error: any) {
+    res.status(503).json({ status: 'error', provider: aiConfig.provider, model, error: error.message });
+  }
 });
 
 app.use('/upload', requireAuth, uploadRouter);
